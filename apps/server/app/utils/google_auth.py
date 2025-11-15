@@ -8,6 +8,11 @@ settings = Settings()
 async def verify_google_token(credential: str) -> Optional[Dict]:
     """Verify Google OAuth credential and return user info"""
     try:
+        print("ID: ", settings.GOOGLE_CLIENT_ID)
+        print(f"DEBUG: Credential length = {len(credential)}")
+        print(f"DEBUG: Credential parts = {len(credential.split('.'))}")  # Should be 3
+        print(f"DEBUG: First 50 chars = {credential[:50]}")
+        
         # Verify the token
         idinfo = id_token.verify_oauth2_token(
             credential, 

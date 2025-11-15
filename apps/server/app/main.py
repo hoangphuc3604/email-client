@@ -14,8 +14,10 @@ settings = Settings()  # type: ignore
 
 if settings.ENVIRONMENT == "development":
     root_path = ""
+    router_prefix = ""
 else:
     root_path = "/api/v1"
+    router_prefix = "/api/v1"
 
 # Configure logging
 now = datetime.now()
@@ -44,7 +46,7 @@ app = FastAPI(
     root_path=root_path
 )
 
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix=router_prefix)
 
 origins = [
     "http://localhost:3000",

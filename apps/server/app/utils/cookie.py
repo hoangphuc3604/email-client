@@ -16,11 +16,16 @@ def get_cookie_settings(request: Request) -> dict:
         samesite = "strict"
     else:
         samesite = "lax"
+
+    if is_production:
+        cookie_path = "/api/v1/auth"
+    else:
+        cookie_path = "/auth"
     
     return {
         "httponly": True,
         "secure": is_production,
         "samesite": samesite,
         "max_age": 7 * 24 * 60 * 60,
-        "path": "/api/v1/auth"
+        "path": cookie_path
     }
