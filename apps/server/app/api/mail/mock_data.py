@@ -1,0 +1,491 @@
+"""Mock email data for dashboard testing.
+
+This mock data structure follows Zero email client's data model:
+- Threads contain multiple messages
+- Uses thread-based structure similar to Gmail/Zero
+- Supports pagination, filtering, and search
+"""
+
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
+import copy
+
+# Mock mailboxes/folders (same as Zero's folder structure)
+MOCK_MAILBOXES: List[Dict[str, Any]] = [
+    {
+        "id": "inbox",
+        "name": "Inbox",
+        "icon": "inbox",
+        "unread_count": 12,
+        "total_count": 156
+    },
+    {
+        "id": "starred",
+        "name": "Starred",
+        "icon": "star",
+        "unread_count": 3,
+        "total_count": 24
+    },
+    {
+        "id": "sent",
+        "name": "Sent",
+        "icon": "send",
+        "unread_count": 0,
+        "total_count": 89
+    },
+    {
+        "id": "drafts",
+        "name": "Drafts",
+        "icon": "draft",
+        "unread_count": 2,
+        "total_count": 8
+    },
+    {
+        "id": "archive",
+        "name": "Archive",
+        "icon": "archive",
+        "unread_count": 0,
+        "total_count": 342
+    },
+    {
+        "id": "trash",
+        "name": "Trash",
+        "icon": "delete",
+        "unread_count": 0,
+        "total_count": 15
+    },
+    {
+        "id": "spam",
+        "name": "Spam",
+        "icon": "report",
+        "unread_count": 5,
+        "total_count": 23
+    },
+    {
+        "id": "work",
+        "name": "Work",
+        "icon": "work",
+        "unread_count": 4,
+        "total_count": 67,
+        "custom": True
+    },
+    {
+        "id": "personal",
+        "name": "Personal",
+        "icon": "person",
+        "unread_count": 1,
+        "total_count": 45,
+        "custom": True
+    }
+]
+
+
+def _generate_timestamp(days_ago: int = 0, hours_ago: int = 0, minutes_ago: int = 0) -> str:
+    """Generate ISO timestamp relative to now."""
+    dt = datetime.now() - timedelta(days=days_ago, hours=hours_ago, minutes=minutes_ago)
+    return dt.isoformat() + "Z"
+
+
+# Mock threads with messages (following Zero's IGetThreadResponse structure)
+# Thread ID -> Thread data with messages
+MOCK_THREADS: Dict[str, Dict[str, Any]] = {
+    "thread_001": {
+        "id": "thread_001",
+        "historyId": "12345",
+        "labels": [{"id": "inbox", "name": "inbox"}, {"id": "work", "name": "work"}],
+        "messages": [
+            {
+                "id": "msg_001_1",
+                "threadId": "thread_001",
+                "connectionId": "conn_001",
+                "title": "Q4 Marketing Campaign Review - Action Required",
+                "subject": "Q4 Marketing Campaign Review - Action Required",
+                "sender": {
+                    "name": "Sarah Johnson",
+                    "email": "sarah.johnson@techcorp.com"
+                },
+                "to": [
+                    {"name": "Me", "email": "me@example.com"}
+                ],
+                "cc": None,
+                "bcc": None,
+                "tls": True,
+                "receivedOn": _generate_timestamp(hours_ago=2),
+                "unread": True,
+                "body": "Hi team,\n\nI've attached the Q4 marketing campaign analysis...",
+                "processedHtml": """<div><p>Hi team,</p><p>I've attached the Q4 marketing campaign analysis. Please review the key metrics and provide your feedback by EOD Friday.</p><p><strong>Key Highlights:</strong></p><ul><li>ROI increased by 23% compared to Q3</li><li>Customer acquisition cost down by 15%</li><li>Email open rates improved to 32%</li></ul><p>Let me know if you have any questions.</p><p>Best regards,<br>Sarah</p></div>""",
+                "blobUrl": "",
+                "decodedBody": """<div><p>Hi team,</p><p>I've attached the Q4 marketing campaign analysis. Please review the key metrics and provide your feedback by EOD Friday.</p><p><strong>Key Highlights:</strong></p><ul><li>ROI increased by 23% compared to Q3</li><li>Customer acquisition cost down by 15%</li><li>Email open rates improved to 32%</li></ul><p>Let me know if you have any questions.</p><p>Best regards,<br>Sarah</p></div>""",
+                "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "work", "name": "work", "type": "user"}],
+                "attachments": [
+                    {
+                        "attachmentId": "att_001",
+                        "filename": "Q4_Campaign_Report.pdf",
+                        "mimeType": "application/pdf",
+                        "size": 2458124,
+                        "body": "",
+                        "headers": []
+                    }
+                ],
+                "isDraft": False,
+                "messageId": "msg_001_1@example.com",
+                "references": None,
+                "inReplyTo": None,
+                "replyTo": None
+            }
+        ]
+    },
+    "thread_002": {
+        "id": "thread_002",
+        "historyId": "12346",
+        "labels": [{"id": "inbox", "name": "inbox"}],
+        "messages": [
+            {
+                "id": "msg_002_1",
+                "threadId": "thread_002",
+                "connectionId": "conn_001",
+                "title": "You have 5 new connection requests",
+                "subject": "You have 5 new connection requests",
+                "sender": {
+                    "name": "LinkedIn",
+                    "email": "noreply@linkedin.com"
+                },
+                "to": [{"name": "Me", "email": "me@example.com"}],
+                "cc": None,
+                "bcc": None,
+                "tls": True,
+                "receivedOn": _generate_timestamp(hours_ago=5),
+                "unread": True,
+                "body": "You have 5 new connection requests waiting for you...",
+                "processedHtml": """<div style="font-family: Arial, sans-serif;"><h2>New Connection Requests</h2><p>You have 5 new connection requests waiting for you:</p><ul><li>John Smith - Software Engineer at Google</li><li>Emily Chen - Product Manager at Meta</li><li>Michael Brown - CTO at StartupXYZ</li><li>Lisa Wang - Senior Developer at Amazon</li><li>David Martinez - Tech Lead at Microsoft</li></ul><p><a href="https://linkedin.com/connections">View all requests</a></p></div>""",
+                "blobUrl": "",
+                "decodedBody": """<div style="font-family: Arial, sans-serif;"><h2>New Connection Requests</h2><p>You have 5 new connection requests waiting for you:</p><ul><li>John Smith - Software Engineer at Google</li><li>Emily Chen - Product Manager at Meta</li><li>Michael Brown - CTO at StartupXYZ</li><li>Lisa Wang - Senior Developer at Amazon</li><li>David Martinez - Tech Lead at Microsoft</li></ul><p><a href="https://linkedin.com/connections">View all requests</a></p></div>""",
+                "tags": [{"id": "inbox", "name": "inbox", "type": "system"}],
+                "attachments": None,
+                "isDraft": False,
+                "messageId": "msg_002_1@example.com",
+                "references": None,
+                "inReplyTo": None,
+                "replyTo": None
+            }
+        ]
+    },
+    "thread_003": {
+        "id": "thread_003",
+        "historyId": "12347",
+        "labels": [{"id": "inbox", "name": "inbox"}, {"id": "work", "name": "work"}],
+        "messages": [
+            {
+                "id": "msg_003_1",
+                "threadId": "thread_003",
+                "connectionId": "conn_001",
+                "title": "Website Redesign Mockups - Round 1",
+                "subject": "Website Redesign Mockups - Round 1",
+                "sender": {
+                    "name": "Me",
+                    "email": "me@example.com"
+                },
+                "to": [{"name": "Alex Rivera", "email": "alex.rivera@designstudio.com"}],
+                "cc": [{"name": "Design Team", "email": "design@example.com"}],
+                "bcc": None,
+                "tls": True,
+                "receivedOn": _generate_timestamp(days_ago=1, hours_ago=3),
+                "unread": False,
+                "body": "Hey Alex, could you review these initial mockups?",
+                "processedHtml": "<div><p>Hey Alex,</p><p>Could you review these initial mockups? Looking for feedback on the overall layout and color scheme.</p><p>Thanks!</p></div>",
+                "blobUrl": "",
+                "decodedBody": "<div><p>Hey Alex,</p><p>Could you review these initial mockups? Looking for feedback on the overall layout and color scheme.</p><p>Thanks!</p></div>",
+                "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "work", "name": "work", "type": "user"}],
+                "attachments": None,
+                "isDraft": False,
+                "messageId": "msg_003_1@example.com",
+                "references": None,
+                "inReplyTo": None,
+                "replyTo": None
+            },
+            {
+                "id": "msg_003_2",
+                "threadId": "thread_003",
+                "connectionId": "conn_001",
+                "title": "Re: Website Redesign Mockups - Round 2",
+                "subject": "Re: Website Redesign Mockups - Round 2",
+                "sender": {
+                    "name": "Alex Rivera",
+                    "email": "alex.rivera@designstudio.com"
+                },
+                "to": [{"name": "Me", "email": "me@example.com"}],
+                "cc": [{"name": "Design Team", "email": "design@example.com"}],
+                "bcc": None,
+                "tls": True,
+                "receivedOn": _generate_timestamp(hours_ago=8),
+                "unread": False,
+                "body": "Thanks for the feedback! I've updated the homepage mockups...",
+                "processedHtml": """<div><p>Hi,</p><p>Thanks for the feedback! I've updated the homepage mockups based on your comments.</p><p>The new version includes:</p><ol><li>Larger hero section with updated CTA</li><li>Simplified navigation menu</li><li>New testimonial section</li><li>Mobile-responsive improvements</li></ol><p>Check out the Figma link and let me know what you think!</p><p>Alex</p></div>""",
+                "blobUrl": "",
+                "decodedBody": """<div><p>Hi,</p><p>Thanks for the feedback! I've updated the homepage mockups based on your comments.</p><p>The new version includes:</p><ol><li>Larger hero section with updated CTA</li><li>Simplified navigation menu</li><li>New testimonial section</li><li>Mobile-responsive improvements</li></ol><p>Check out the Figma link and let me know what you think!</p><p>Alex</p></div>""",
+                "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "starred", "name": "starred", "type": "system"}, {"id": "work", "name": "work", "type": "user"}],
+                "attachments": None,
+                "isDraft": False,
+                "messageId": "msg_003_2@example.com",
+                "references": "<msg_003_1@example.com>",
+                "inReplyTo": "<msg_003_1@example.com>",
+                "replyTo": None
+            }
+        ]
+    },
+    "thread_004": {
+        "id": "thread_004",
+        "historyId": "12348",
+        "labels": [{"id": "inbox", "name": "inbox"}],
+        "messages": [
+            {
+                "id": "msg_004_1",
+                "threadId": "thread_004",
+                "connectionId": "conn_001",
+                "title": "[GitHub] Pull Request #1234: Add user authentication",
+                "subject": "[GitHub] Pull Request #1234: Add user authentication",
+                "sender": {
+                    "name": "GitHub",
+                    "email": "notifications@github.com"
+                },
+                "to": [{"name": "Me", "email": "me@example.com"}],
+                "cc": None,
+                "bcc": None,
+                "tls": True,
+                "receivedOn": _generate_timestamp(hours_ago=12),
+                "unread": False,
+                "body": "A new pull request has been opened...",
+                "processedHtml": """<div><h3>Pull Request #1234</h3><p><strong>Add user authentication</strong></p><p>@johndoe has opened a pull request:</p><ul><li>Implements JWT-based authentication</li><li>Adds login/logout endpoints</li><li>Updates documentation</li></ul><p><a href="https://github.com/example/repo/pull/1234">View Pull Request</a></p></div>""",
+                "blobUrl": "",
+                "decodedBody": """<div><h3>Pull Request #1234</h3><p><strong>Add user authentication</strong></p><p>@johndoe has opened a pull request:</p><ul><li>Implements JWT-based authentication</li><li>Adds login/logout endpoints</li><li>Updates documentation</li></ul><p><a href="https://github.com/example/repo/pull/1234">View Pull Request</a></p></div>""",
+                "tags": [{"id": "inbox", "name": "inbox", "type": "system"}],
+                "attachments": None,
+                "isDraft": False,
+                "messageId": "msg_004_1@example.com",
+                "references": None,
+                "inReplyTo": None,
+                "replyTo": None
+            }
+        ]
+    },
+    "thread_005": {
+        "id": "thread_005",
+        "historyId": "12349",
+        "labels": [{"id": "inbox", "name": "inbox"}, {"id": "personal", "name": "personal"}],
+        "messages": [
+            {
+                "id": "msg_005_1",
+                "threadId": "thread_005",
+                "connectionId": "conn_001",
+                "title": "Family Reunion Planning",
+                "subject": "Family Reunion Planning",
+                "sender": {
+                    "name": "Mom",
+                    "email": "mom@family.com"
+                },
+                "to": [
+                    {"name": "Me", "email": "me@example.com"},
+                    {"name": "Sister", "email": "sister@family.com"}
+                ],
+                "cc": None,
+                "bcc": None,
+                "tls": True,
+                "receivedOn": _generate_timestamp(days_ago=1),
+                "unread": True,
+                "body": "Hi kids, let's plan the summer reunion...",
+                "processedHtml": """<div><p>Hi kids,</p><p>Let's plan the summer reunion! I was thinking the first weekend in July. What do you think?</p><p>Location ideas:</p><ul><li>Grandma's house</li><li>The lake cabin</li><li>City park with BBQ facilities</li></ul><p>Let me know your availability!</p><p>Love, Mom</p></div>""",
+                "blobUrl": "",
+                "decodedBody": """<div><p>Hi kids,</p><p>Let's plan the summer reunion! I was thinking the first weekend in July. What do you think?</p><p>Location ideas:</p><ul><li>Grandma's house</li><li>The lake cabin</li><li>City park with BBQ facilities</li></ul><p>Let me know your availability!</p><p>Love, Mom</p></div>""",
+                "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "personal", "name": "personal", "type": "user"}],
+                "attachments": None,
+                "isDraft": False,
+                "messageId": "msg_005_1@example.com",
+                "references": None,
+                "inReplyTo": None,
+                "replyTo": None
+            }
+        ]
+    }
+}
+
+# Thread list items for mailbox views (lightweight representation)
+# This is what gets returned by GET /mailboxes/:id/emails
+MOCK_THREAD_LIST: Dict[str, List[Dict[str, Any]]] = {
+    "inbox": [
+        {"id": "thread_001", "historyId": "12345"},
+        {"id": "thread_002", "historyId": "12346"},
+        {"id": "thread_003", "historyId": "12347"},
+        {"id": "thread_004", "historyId": "12348"},
+        {"id": "thread_005", "historyId": "12349"},
+    ],
+    "starred": [
+        {"id": "thread_003", "historyId": "12347"},
+    ],
+    "sent": [],
+    "drafts": [],
+    "work": [
+        {"id": "thread_001", "historyId": "12345"},
+        {"id": "thread_003", "historyId": "12347"},
+    ],
+    "personal": [
+        {"id": "thread_005", "historyId": "12349"},
+    ]
+}
+
+
+def get_mailboxes() -> List[Dict[str, Any]]:
+    """Return list of all mailboxes."""
+    return MOCK_MAILBOXES
+
+
+def get_emails_by_mailbox(
+    mailbox_id: str,
+    page: int = 1,
+    limit: int = 50
+) -> Dict[str, Any]:
+    """
+    Get paginated thread list for a mailbox.
+    Returns thread IDs with historyId (lightweight) plus preview data.
+    
+    This mimics Zero's listThreads endpoint that returns:
+    { threads: [{ id, historyId }], nextPageToken }
+    
+    Frontend then uses the thread IDs to render previews from the latest message.
+    """
+    threads = MOCK_THREAD_LIST.get(mailbox_id, [])
+    
+    # Calculate pagination
+    total = len(threads)
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    
+    paginated_threads = threads[start_idx:end_idx]
+    
+    # Return thread list with basic IDs
+    # Frontend will call GET /emails/:id for full details when needed
+    return {
+        "threads": paginated_threads,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_next": end_idx < total,
+        "has_prev": page > 1,
+        "nextPageToken": str(page + 1) if end_idx < total else None
+    }
+
+
+def get_email_by_id(thread_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get full thread detail with all messages.
+    Returns IGetThreadResponse format following Zero's structure:
+    {
+        messages: ParsedMessage[],
+        latest: ParsedMessage,
+        hasUnread: boolean,
+        totalReplies: number,
+        labels: Label[],
+        isLatestDraft?: boolean
+    }
+    """
+    thread = MOCK_THREADS.get(thread_id)
+    if not thread:
+        return None
+    
+    messages = thread["messages"]
+    latest = messages[-1]  # Last message is latest
+    has_unread = any(msg["unread"] for msg in messages)
+    total_replies = len(messages) - 1
+    
+    return {
+        "messages": messages,
+        "latest": latest,
+        "hasUnread": has_unread,
+        "totalReplies": total_replies,
+        "labels": thread["labels"],
+        "isLatestDraft": latest.get("isDraft", False)
+    }
+
+
+def update_email(thread_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Update thread properties (unread, starred, labels).
+    In this mock implementation, we update the latest message's properties.
+    """
+    thread = MOCK_THREADS.get(thread_id)
+    if not thread:
+        return None
+    
+    latest = thread["messages"][-1]
+    
+    # Update unread status
+    if "unread" in updates:
+        latest["unread"] = updates["unread"]
+    
+    # Update starred (in tags)
+    if "starred" in updates:
+        tags = latest["tags"]
+        starred_tag = {"id": "starred", "name": "starred", "type": "system"}
+        
+        if updates["starred"]:
+            if not any(t["id"] == "starred" for t in tags):
+                tags.append(starred_tag)
+        else:
+            latest["tags"] = [t for t in tags if t["id"] != "starred"]
+    
+    # Update labels
+    if "labels" in updates:
+        new_labels = [
+            {"id": label, "name": label, "type": "user" if label not in ["inbox", "sent", "starred", "trash"] else "system"} 
+            for label in updates["labels"]
+        ]
+        latest["tags"] = new_labels
+        thread["labels"] = [{"id": l, "name": l} for l in updates["labels"]]
+    
+    return get_email_by_id(thread_id)
+
+
+def search_emails(query: str, mailbox_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Search emails by query string.
+    Searches in subject, body, sender name/email.
+    Returns thread previews (not full messages).
+    """
+    query_lower = query.lower()
+    results = []
+    
+    # Filter threads by mailbox if specified
+    if mailbox_id:
+        thread_ids = [t["id"] for t in MOCK_THREAD_LIST.get(mailbox_id, [])]
+    else:
+        thread_ids = list(MOCK_THREADS.keys())
+    
+    for thread_id in thread_ids:
+        thread = MOCK_THREADS.get(thread_id)
+        if not thread:
+            continue
+        
+        # Search in any message of the thread
+        for message in thread["messages"]:
+            # Search in subject, body, sender name, sender email
+            if (
+                query_lower in message["subject"].lower() or
+                query_lower in message["body"].lower() or
+                query_lower in message["sender"].get("name", "").lower() or
+                query_lower in message["sender"]["email"].lower()
+            ):
+                # Return thread preview with latest message
+                latest = thread["messages"][-1]
+                results.append({
+                    "id": thread_id,
+                    "historyId": thread["historyId"],
+                    "subject": latest["subject"],
+                    "sender": latest["sender"],
+                    "to": latest["to"],
+                    "receivedOn": latest["receivedOn"],
+                    "unread": latest["unread"],
+                    "tags": latest["tags"],
+                    "body": latest["body"][:150] + "..." if len(latest["body"]) > 150 else latest["body"],
+                })
+                break  # Only add thread once
+    
+    return results

@@ -226,10 +226,10 @@ paths:
                   message:
                     type: string
                     example: Logged out successfully
-  /mailboxes:
+  /mail/mailboxes:
     get:
       summary: List mailboxes/folders
-      description: Get list of mailboxes (Inbox, Sent, Drafts, etc.) - Mock API endpoint
+      description: Get list of mailboxes (Inbox, Sent, Drafts, etc.) following Zero's structure - Mock API endpoint
       tags:
         - Mail
       security:
@@ -240,22 +240,20 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  mailboxes:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Mailbox'
+                $ref: '#/components/schemas/APIResponse'
         '401':
           description: Unauthorized - invalid or missing access token
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /mailboxes/{mailbox_id}/emails:
+  /mail/mailboxes/{mailbox_id}/emails:
     get:
-      summary: List emails in mailbox
-      description: Get paginated list of emails in a mailbox - Mock API endpoint
+      summary: List thread IDs in mailbox
+      description: |
+        Get paginated list of thread IDs (lightweight) for a mailbox following Zero's listThreads pattern.
+        Returns only thread IDs and historyIds. Frontend should call GET /mail/emails/:id for full thread details.
+        Mock API endpoint.
       tags:
         - Mail
       security:
@@ -266,40 +264,46 @@ paths:
           required: true
           schema:
             type: string
+          description: Mailbox ID (inbox, sent, drafts, starred, etc.)
         - name: page
           in: query
           schema:
             type: integer
             default: 1
+          description: Page number (starts at 1)
         - name: limit
           in: query
           schema:
             type: integer
-            default: 20
+            default: 50
+            maximum: 100
+          description: Items per page (max 100)
       responses:
         '200':
-          description: List of emails
+          description: Thread list with pagination metadata
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  emails:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/EmailListItem'
-                  pagination:
-                    $ref: '#/components/schemas/Pagination'
+                  data:
+                    $ref: '#/components/schemas/ThreadListResponse'
+                  message:
+                    type: string
+                    example: Emails retrieved successfully
         '401':
           description: Unauthorized - invalid or missing access token
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /emails/{email_id}:
+  /mail/emails/{email_id}:
     get:
-      summary: Get email detail
-      description: Get full email details including body and attachments - Mock API endpoint
+      summary: Get full thread detail
+      description: |
+        Get complete thread data with all messages following Zero's IGetThreadResponse structure.
+        Returns all messages in thread, latest message, labels, and metadata.
+        Mock API endpoint.
       tags:
         - Mail
       security:
@@ -310,13 +314,20 @@ paths:
           required: true
           schema:
             type: string
+          description: Thread ID
       responses:
         '200':
-          description: Email details
+          description: Thread details with all messages
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmailDetail'
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ThreadDetailResponse'
+                  message:
+                    type: string
+                    example: Email retrieved successfully
         '401':
           description: Unauthorized - invalid or missing access token
           content:
@@ -324,7 +335,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '404':
-          description: Email not found
+          description: Thread not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /mail/emails/search:
+    post:
+      summary: Search threads
+      description: Search threads by query string in subject, body, sender name and email - Mock API endpoint
+      tags:
+        - Mail
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  description: Search query string
+                mailbox_id:
+                  type: string
+                  description: Optional mailbox filter
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ThreadPreview'
+                  message:
+                    type: string
+                    example: Search results retrieved successfully
+        '401':
+          description: Unauthorized - invalid or missing access token
           content:
             application/json:
               schema:
@@ -382,117 +438,246 @@ components:
           type: string
         message:
           type: string
+    APIResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          description: Response data (structure varies by endpoint)
+        message:
+          type: string
+          description: Human-readable message
     Mailbox:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Mailbox identifier
+          example: inbox
+        name:
+          type: string
+          example: Inbox
+        icon:
+          type: string
+          description: Icon identifier for UI
+          example: inbox
+        unread_count:
+          type: integer
+          example: 12
+        total_count:
+          type: integer
+          example: 156
+        custom:
+          type: boolean
+          description: Whether this is a custom user-created mailbox
+          example: false
+    ThreadListItem:
+      type: object
+      description: Lightweight thread item for list views (following Zero's structure)
+      properties:
+        id:
+          type: string
+          description: Thread ID
+        historyId:
+          type: string
+          nullable: true
+          description: History ID for syncing
+    ThreadListResponse:
+      type: object
+      description: Response for listing threads (following Zero's IGetThreadsResponse)
+      properties:
+        threads:
+          type: array
+          items:
+            $ref: '#/components/schemas/ThreadListItem'
+        nextPageToken:
+          type: string
+          nullable: true
+          description: Token for next page
+        total:
+          type: integer
+          description: Total number of threads
+        page:
+          type: integer
+          description: Current page number
+        limit:
+          type: integer
+          description: Items per page
+        has_next:
+          type: boolean
+          description: Whether there is a next page
+        has_prev:
+          type: boolean
+          description: Whether there is a previous page
+    Sender:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        email:
+          type: string
+    Label:
       type: object
       properties:
         id:
           type: string
         name:
           type: string
-          example: Inbox
-        unread_count:
-          type: integer
-          example: 5
         type:
           type: string
-          enum: [inbox, starred, sent, drafts, archive, trash, custom]
-    EmailListItem:
+          nullable: true
+          description: system or user
+    ParsedMessage:
       type: object
+      description: Full email message (following Zero's ParsedMessage structure)
       properties:
         id:
           type: string
-        sender_name:
+        threadId:
           type: string
-        sender_email:
+        connectionId:
+          type: string
+          nullable: true
+        title:
           type: string
         subject:
           type: string
-        preview:
-          type: string
-          description: Short preview text (single-line ellipsis)
-        timestamp:
-          type: string
-          format: date-time
-        is_starred:
-          type: boolean
-        is_read:
-          type: boolean
-        is_important:
-          type: boolean
-    EmailDetail:
-      type: object
-      properties:
-        id:
-          type: string
-        from:
-          type: object
-          properties:
-            name:
-              type: string
-            email:
-              type: string
+        sender:
+          $ref: '#/components/schemas/Sender'
         to:
           type: array
           items:
-            type: object
-            properties:
-              name:
-                type: string
-              email:
-                type: string
+            $ref: '#/components/schemas/Sender'
         cc:
           type: array
+          nullable: true
           items:
-            type: object
-            properties:
-              name:
-                type: string
-              email:
-                type: string
-        subject:
-          type: string
-        received_at:
+            $ref: '#/components/schemas/Sender'
+        bcc:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/Sender'
+        tls:
+          type: boolean
+        receivedOn:
           type: string
           format: date-time
-        body_html:
+          description: ISO timestamp
+        unread:
+          type: boolean
+        body:
           type: string
-          description: HTML formatted email body
-        body_plain:
+          description: Plain text body
+        processedHtml:
           type: string
-          description: Plain text email body
-        attachments:
+          description: Processed HTML body
+        blobUrl:
+          type: string
+        decodedBody:
+          type: string
+          nullable: true
+          description: Raw decoded HTML body
+        tags:
           type: array
           items:
+            $ref: '#/components/schemas/Label'
+        attachments:
+          type: array
+          nullable: true
+          items:
             $ref: '#/components/schemas/Attachment'
-        is_starred:
+        isDraft:
           type: boolean
-        is_read:
-          type: boolean
-    Attachment:
+          nullable: true
+        messageId:
+          type: string
+          nullable: true
+        references:
+          type: string
+          nullable: true
+        inReplyTo:
+          type: string
+          nullable: true
+        replyTo:
+          type: string
+          nullable: true
+    ThreadDetailResponse:
       type: object
+      description: Response for thread detail (following Zero's IGetThreadResponse)
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsedMessage'
+          description: All messages in thread
+        latest:
+          $ref: '#/components/schemas/ParsedMessage'
+          description: Latest message in thread
+        hasUnread:
+          type: boolean
+          description: Whether thread has unread messages
+        totalReplies:
+          type: integer
+          description: Number of replies (messages - 1)
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/Label'
+          description: Thread labels
+        isLatestDraft:
+          type: boolean
+          nullable: true
+          description: Whether latest message is a draft
+    ThreadPreview:
+      type: object
+      description: Thread preview for search results
       properties:
         id:
           type: string
+        historyId:
+          type: string
+          nullable: true
+        subject:
+          type: string
+        sender:
+          $ref: '#/components/schemas/Sender'
+        to:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sender'
+        receivedOn:
+          type: string
+          format: date-time
+        unread:
+          type: boolean
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Label'
+        body:
+          type: string
+          description: Preview text (truncated)
+    Attachment:
+      type: object
+      properties:
+        attachmentId:
+          type: string
         filename:
+          type: string
+        mimeType:
           type: string
         size:
           type: integer
-        content_type:
+          description: Size in bytes
+        body:
           type: string
-        download_url:
-          type: string
-          format: uri
-    Pagination:
-      type: object
-      properties:
-        page:
-          type: integer
-        limit:
-          type: integer
-        total:
-          type: integer
-        has_next:
-          type: boolean
+          description: Base64 encoded content or empty
+        headers:
+          type: array
+          items:
+            type: object
 security:
   - bearerAuth: []
 
