@@ -9,11 +9,20 @@
   - Protected routes with redirect to /login
   - Logout functionality clearing all tokens
 - **Email Dashboard Mockup (3-Column Layout)**
-  - Responsive three-column layout: Folders (left ~20%), Email List (center ~40%), Email Detail (right ~40%)
-  - Mock API endpoints: GET /mailboxes, GET /mailboxes/:id/emails, GET /emails/:id
-  - Mock API implementation: Can use static JSON files, mock API library (e.g., MSW, json-server), or local mock server
-  - Mock API returns realistic sample data: sender name, subject, preview text, timestamps, message body, attachments
-  - Folder navigation, email selection, detail view with actions (Reply, Forward, Delete, Star, etc.)
+  - Responsive three-column layout: Folders (left ~20%), Thread List (center ~40%), Thread Detail (right ~40%)
+  - Mock API endpoints following Zero's architecture:
+    - GET /mail/mailboxes — List mailboxes/folders
+    - GET /mail/mailboxes/:id/emails — List thread IDs (lightweight: `{ id, historyId }`)
+    - GET /mail/emails/:id — Get full thread detail with all messages
+    - POST /mail/emails/search — Search threads by query
+  - Mock API implementation: FastAPI backend with static mock data following Zero's data structures (`ParsedMessage`, `IGetThreadResponse`)
+  - Thread-based structure: Groups related emails into conversations
+  - Efficient loading pattern:
+    - Virtual scrolling: Render only visible threads (~10-15 on screen)
+    - React Query caching: 1-hour staleTime, no redundant API calls
+    - Lazy loading: Fetch thread details on-demand when thread is rendered
+  - Mock API returns realistic sample data: sender name/email, subject, body preview, timestamps, thread labels, attachments
+  - Folder navigation, thread selection, detail view with all messages, action buttons (Reply, Forward, Delete, Star, etc.) — UI mockup only
   - Keyboard accessibility (Arrow keys, Enter, Tab) and responsive mobile fallback (single-column with back button)
 - **API Client & Token Management**
   - API client with automatic token attachment (Authorization: Bearer)
