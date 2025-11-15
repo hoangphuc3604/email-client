@@ -1,0 +1,498 @@
+openapi: 3.1.0
+info:
+  title: Email Client API
+  version: 0.1.0
+  description: >
+    REST API for the Email Client project powered by FastAPI.
+    Update via automated schema generation as routes evolve.
+servers:
+  - url: https://localhost:8000/api/v1
+    description: Local development
+paths:
+  /auth/login:
+    post:
+      summary: Email/password login
+      description: |
+        Authenticate user with email and password.
+        Returns access token in response body.
+        Sets refresh token as HttpOnly cookie.
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Successful authentication
+          headers:
+            Set-Cookie:
+              description: HttpOnly cookie containing refresh token
+              schema:
+                type: string
+                example: refresh_token=<jwt>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=604800
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseWithoutRefreshToken'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/register:
+    post:
+      summary: Register new user with email and password
+      description: |
+        Create a new user account with email and password.
+        Returns access token in response body.
+        Sets refresh token as HttpOnly cookie.
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - name
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: User email address (must be unique)
+                password:
+                  type: string
+                  format: password
+                  description: User password (minimum 8 characters recommended)
+                name:
+                  type: string
+                  description: User display name
+      responses:
+        '201':
+          description: User successfully registered
+          headers:
+            Set-Cookie:
+              description: HttpOnly cookie containing refresh token
+              schema:
+                type: string
+                example: refresh_token=<jwt>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=604800
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseWithoutRefreshToken'
+        '400':
+          description: Bad request - email already exists or validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/google:
+    post:
+      summary: Google OAuth sign-in
+      description: |
+        Exchange Google credential/token for app access and refresh tokens.
+        Creates new user if first-time login.
+        Returns access token in response body.
+        Sets refresh token as HttpOnly cookie.
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - credential
+              properties:
+                credential:
+                  type: string
+                  description: Google OAuth credential/token from frontend
+      responses:
+        '200':
+          description: Successful authentication
+          headers:
+            Set-Cookie:
+              description: HttpOnly cookie containing refresh token
+              schema:
+                type: string
+                example: refresh_token=<jwt>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=604800
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseWithoutRefreshToken'
+        '401':
+          description: Invalid or expired Google credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/refresh:
+    post:
+      summary: Refresh access token
+      description: |
+        Exchange refresh token for new access token.
+        Refresh token is automatically sent via HttpOnly cookie.
+        Returns new access token with expiry information.
+      tags:
+        - Auth
+      parameters:
+        - name: refresh_token
+          in: cookie
+          required: true
+          schema:
+            type: string
+          description: Refresh token stored in HttpOnly cookie
+      responses:
+        '200':
+          description: New access token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      access_token:
+                        type: string
+                        description: New JWT access token
+                      expires_in:
+                        type: integer
+                        description: Token lifetime in seconds (900 = 15 minutes)
+                  message:
+                    type: string
+                    example: Token refreshed successfully
+        '401':
+          description: Invalid, expired, or missing refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/logout:
+    post:
+      summary: Logout user
+      description: |
+        Revoke refresh token and clear HttpOnly cookie.
+        Access token should be cleared client-side.
+      tags:
+        - Auth
+      parameters:
+        - name: refresh_token
+          in: cookie
+          schema:
+            type: string
+          description: Refresh token to revoke (optional if already expired)
+      responses:
+        '200':
+          description: Successfully logged out
+          headers:
+            Set-Cookie:
+              description: Clears refresh_token cookie
+              schema:
+                type: string
+                example: refresh_token=; Path=/api/v1/auth; Max-Age=0
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    nullable: true
+                  message:
+                    type: string
+                    example: Logged out successfully
+  /mailboxes:
+    get:
+      summary: List mailboxes/folders
+      description: Get list of mailboxes (Inbox, Sent, Drafts, etc.) - Mock API endpoint
+      tags:
+        - Mail
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of mailboxes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mailboxes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Mailbox'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /mailboxes/{mailbox_id}/emails:
+    get:
+      summary: List emails in mailbox
+      description: Get paginated list of emails in a mailbox - Mock API endpoint
+      tags:
+        - Mail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: mailbox_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of emails
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  emails:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EmailListItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /emails/{email_id}:
+    get:
+      summary: Get email detail
+      description: Get full email details including body and attachments - Mock API endpoint
+      tags:
+        - Mail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: email_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Email details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailDetail'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Email not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access token (15 min expiry, stored in-memory)
+        refresh_token:
+          type: string
+          description: JWT refresh token (7 days expiry, stored in HttpOnly cookie)
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            name:
+              type: string
+    AuthResponseWithoutRefreshToken:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            access_token:
+              type: string
+              description: JWT access token (15 min expiry, stored in-memory)
+            user:
+              type: object
+              properties:
+                id:
+                  type: string
+                email:
+                  type: string
+                name:
+                  type: string
+        message:
+          type: string
+          example: Login successful
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+    Mailbox:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          example: Inbox
+        unread_count:
+          type: integer
+          example: 5
+        type:
+          type: string
+          enum: [inbox, starred, sent, drafts, archive, trash, custom]
+    EmailListItem:
+      type: object
+      properties:
+        id:
+          type: string
+        sender_name:
+          type: string
+        sender_email:
+          type: string
+        subject:
+          type: string
+        preview:
+          type: string
+          description: Short preview text (single-line ellipsis)
+        timestamp:
+          type: string
+          format: date-time
+        is_starred:
+          type: boolean
+        is_read:
+          type: boolean
+        is_important:
+          type: boolean
+    EmailDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        from:
+          type: object
+          properties:
+            name:
+              type: string
+            email:
+              type: string
+        to:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+        cc:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+        subject:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        body_html:
+          type: string
+          description: HTML formatted email body
+        body_plain:
+          type: string
+          description: Plain text email body
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        is_starred:
+          type: boolean
+        is_read:
+          type: boolean
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        size:
+          type: integer
+        content_type:
+          type: string
+        download_url:
+          type: string
+          format: uri
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        has_next:
+          type: boolean
+security:
+  - bearerAuth: []
+

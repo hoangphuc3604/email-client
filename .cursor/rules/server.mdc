@@ -1,0 +1,426 @@
+---
+alwaysApply: true
+---
+
+# Email Client Backend - Cursor Rules
+
+## Project Structure
+
+Follow the modular structure inspired by `cqtpos-be` but with improvements:
+
+```
+apps/server/app/
+├── api/                    # API modules grouped by domain
+│   ├── auth/               # Authentication module
+│   │   ├── router.py      # FastAPI router with endpoints
+│   │   ├── service.py     # Business logic and database queries
+│   │   ├── models.py      # Pydantic request/response models
+│   │   ├── dependencies.py # Module-specific dependencies (auth, permissions)
+│   │   └── utils.py       # Module-specific utilities (optional)
+│   ├── mail/              # Mail module (threads, messages, compose)
+│   ├── sync/              # Background sync workers
+│   ├── agents/            # AI integrations
+│   ├── admin/             # Admin endpoints (connectors, feature flags)
+│   └── router.py          # Main router consolidating all modules
+├── models/                # Global/shared models
+│   └── api_response.py    # Standard API response wrappers
+├── utils/                 # Shared utilities
+│   ├── jwt.py            # JWT token creation/verification
+│   ├── password.py       # Password hashing utilities
+│   └── id_generator.py   # ID generation utilities
+├── config.py             # Pydantic Settings (env-driven configuration)
+├── database.py           # MongoDB connection and dependency injection
+└── main.py               # FastAPI app initialization
+```
+
+## Code Organization Principles
+
+1. **Domain-driven structure**: Each API module (`auth`, `mail`, etc.) is self-contained with its own router, service, models, and dependencies.
+2. **Separation of concerns**:
+   - `router.py`: HTTP endpoints, request validation, response formatting
+   - `service.py`: Business logic, database operations, external API calls
+   - `models.py`: Pydantic models for request/response validation
+   - `dependencies.py`: FastAPI dependencies (auth, permissions, etc.)
+3. **Shared code**: Place common utilities in `app/utils/`, shared models in `app/models/`.
+4. **No circular dependencies**: Modules should not import from each other. Use shared utilities/models instead.
+
+## FastAPI Patterns
+
+### Router Structure
+
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from app.api.auth.service import AuthService
+from app.api.auth.models import LoginRequest
+from app.models.api_response import APIResponse
+
+router = APIRouter(prefix="/auth", tags=["Auth"])
+
+@router.post("/login")
+async def login(
+    credentials: LoginRequest,
+    auth_svc: AuthService = Depends(AuthService),
+) -> APIResponse:
+    """Authenticate user and issue tokens"""
+    tokens = await auth_svc.login(credentials.email, credentials.password)
+    return APIResponse(
+        data=tokens,
+        message="Login successful"
+    )
+```
+
+### Service Layer Pattern
+
+```python
+from fastapi import Depends, HTTPException
+from pymongo.asynchronous.database import AsyncDatabase
+from app.database import get_db
+from app.api.auth.models import TokenOut
+
+class AuthService:
+    def __init__(self, db: AsyncDatabase = Depends(get_db)):
+        self.db = db
+        self.users_collection = db.get_collection("users")
+
+    async def login(self, email: str, password: str) -> TokenOut:
+        """Business logic for authentication"""
+        user = await self.users_collection.find_one({"email": email})
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        # ... validation logic ...
+        return tokens
+```
+
+### Response Formatting
+
+Always use `APIResponse` or `APIResponseWithPagination` from `app.models.api_response`:
+
+```python
+from app.models.api_response import APIResponse, APIResponseWithPagination
+
+# Single item response
+return APIResponse(
+    data=user_data,
+    message="User fetched successfully"
+)
+
+# Paginated response
+return APIResponseWithPagination(
+    data=items,
+    message="Items retrieved successfully",
+    page=page,
+    limit=limit,
+    total=total_count,
+    has_next=has_next
+)
+```
+
+## MongoDB Patterns
+
+### Database Dependency
+
+Always use the `get_db` dependency from `app.database`:
+
+```python
+from fastapi import Depends
+from pymongo.asynchronous.database import AsyncDatabase
+from app.database import get_db
+
+async def some_function(db: AsyncDatabase = Depends(get_db)):
+    collection = db.get_collection("collection_name")
+    # ... operations ...
+```
+
+### Async Operations
+
+- Always use async/await for MongoDB operations
+- Use `AsyncMongoClient` and `AsyncDatabase` from `pymongo`
+- Close connections properly in dependency cleanup
+
+### Query Patterns
+
+```python
+# Find one
+user = await collection.find_one({"email": email})
+
+# Find many with pagination
+skip = (page - 1) * limit
+cursor = collection.find(query).skip(skip).limit(limit)
+items = await cursor.to_list(length=limit)
+total = await collection.count_documents(query)
+
+# Insert
+result = await collection.insert_one(document)
+inserted_id = result.inserted_id
+
+# Update
+await collection.update_one(
+    {"_id": ObjectId(id)},
+    {"$set": update_data}
+)
+
+# Delete
+await collection.find_one_and_delete({"_id": ObjectId(id)})
+```
+
+## Authentication & Authorization
+
+### JWT Token Handling
+
+- Use utilities from `app.utils.jwt` for token creation/verification
+- Access tokens: short-lived (15 minutes default)
+- Refresh tokens: long-lived (7 days default)
+- Store refresh tokens in HTTP-only cookies (secure, samesite="none" for cross-origin)
+
+### Authentication Dependency
+
+Create reusable auth dependencies in `dependencies.py`:
+
+```python
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.utils.jwt import verify_token
+
+auth_scheme = HTTPBearer(auto_error=False)
+
+async def get_current_user(
+    token: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: AsyncDatabase = Depends(get_db)
+):
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    payload = verify_token(token.credentials, token_type="access")
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    # Fetch and return user
+    return user
+```
+
+## Error Handling
+
+### HTTP Exceptions
+
+Use FastAPI's `HTTPException` with appropriate status codes:
+
+```python
+from fastapi import HTTPException
+
+# 400 Bad Request
+raise HTTPException(status_code=400, detail="Invalid input data")
+
+# 401 Unauthorized
+raise HTTPException(status_code=401, detail="Authentication required")
+
+# 403 Forbidden
+raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+# 404 Not Found
+raise HTTPException(status_code=404, detail="Resource not found")
+
+# 409 Conflict
+raise HTTPException(status_code=409, detail="Resource already exists")
+```
+
+### Global Exception Handler
+
+The global exception handler in `main.py` catches unhandled exceptions. For expected errors, use `HTTPException` instead.
+
+## Configuration
+
+### Settings Pattern
+
+Use Pydantic Settings in `app/config.py`:
+
+```python
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    ENVIRONMENT: str
+    DB_CONNECTION_STRING: str
+    DB_NAME: str
+    JWT_SECRET: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_DURATION_MINUTE: int = 15
+    REFRESH_TOKEN_DURATION_DAY: int = 7
+    BASE_URL: str
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+
+    model_config = SettingsConfigDict(env_file=".env.local")
+```
+
+Access settings via dependency injection:
+
+```python
+from functools import lru_cache
+from app.config import Settings
+
+@lru_cache
+def get_settings():
+    return Settings()
+```
+
+## Code Quality Standards
+
+### Type Hints
+
+- Always use type hints for function parameters and return types
+- Use `Optional[T]` for nullable values
+- Use `List[T]`, `Dict[str, T]` for collections
+- Use Pydantic models for request/response validation
+
+### Async/Await
+
+- All database operations must be async
+- All route handlers must be async
+- Use `await` for all async operations
+
+### Import Organization
+
+```python
+# Standard library
+from datetime import datetime, timedelta
+from typing import Optional, List
+
+# Third-party
+from fastapi import APIRouter, Depends, HTTPException
+from pymongo import AsyncMongoClient
+
+# Local
+from app.config import Settings
+from app.database import get_db
+from app.models.api_response import APIResponse
+```
+
+### Naming Conventions
+
+- **Files**: `snake_case.py`
+- **Classes**: `PascalCase` (e.g., `AuthService`, `LoginRequest`)
+- **Functions/variables**: `snake_case` (e.g., `get_current_user`, `user_id`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRY_COUNT`)
+- **Collections**: Use descriptive names ending with `_collection` (e.g., `users_collection`)
+
+## Testing
+
+### Test Structure
+
+- Place tests in `tests/` directory mirroring `app/` structure
+- Use `pytest` and `pytest-asyncio` for async tests
+- Use test database (separate from development/production)
+
+### Test Patterns
+
+```python
+import pytest
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_login_success():
+    response = client.post("/api/v1/auth/login", json={
+        "email": "test@example.com",
+        "password": "password123"
+    })
+    assert response.status_code == 200
+    assert "access_token" in response.json()["data"]
+```
+
+## Documentation
+
+### Docstrings
+
+Add docstrings to service methods and complex functions:
+
+```python
+async def login(self, email: str, password: str) -> TokenOut:
+    """
+    Authenticate user with email and password.
+    
+    Args:
+        email: User email address
+        password: User password (plaintext)
+    
+    Returns:
+        TokenOut with access and refresh tokens
+    
+    Raises:
+        HTTPException: 401 if credentials are invalid
+    """
+```
+
+### API Documentation
+
+- FastAPI auto-generates OpenAPI docs at `/docs`
+- Use descriptive endpoint descriptions in router docstrings
+- Tag endpoints appropriately for grouping in docs
+
+## Security Best Practices
+
+1. **Password Hashing**: Always use `bcrypt` (from `app.utils.password`) for password hashing
+2. **JWT Secrets**: Never hardcode secrets; use environment variables
+3. **Input Validation**: Use Pydantic models for all request validation
+4. **SQL Injection**: Not applicable (MongoDB), but validate ObjectId format
+5. **CORS**: Configure CORS middleware in `main.py` appropriately
+6. **Rate Limiting**: Implement rate limiting for auth endpoints (future)
+
+## Common Patterns to Avoid (from cqtpos-be issues)
+
+1. **Don't create new database clients in every function** - Use dependency injection
+2. **Don't mix sync and async** - Keep everything async
+3. **Don't forget error handling** - Always handle edge cases
+4. **Don't hardcode values** - Use configuration from Settings
+5. **Don't skip type hints** - Always provide type annotations
+6. **Don't create circular dependencies** - Keep modules independent
+
+## Module-Specific Guidelines
+
+### Auth Module
+
+- Handle both email/password and OAuth flows
+- Issue both access and refresh tokens
+- Store sessions in MongoDB for validation
+- Implement token refresh endpoint
+- Clear sessions on logout
+
+### Mail Module
+
+- Use thread-based organization
+- Support pagination for email lists
+- Handle attachments via S3-compatible storage
+- Implement search with MongoDB text indexes
+- Support draft autosave
+
+### Sync Module
+
+- Use background workers (Celery/RQ) for IMAP sync
+- Implement retry logic for failed syncs
+- Use Redis for job queues
+- Log sync status and errors
+
+## Environment Variables
+
+Required environment variables (document in `.env.example`):
+
+```bash
+ENVIRONMENT=local|development|production
+DB_CONNECTION_STRING=mongodb://...
+DB_NAME=emailclient
+JWT_SECRET=your-secret-key
+ALGORITHM=HS256
+ACCESS_TOKEN_DURATION_MINUTE=15
+REFRESH_TOKEN_DURATION_DAY=7
+BASE_URL=http://localhost:8000
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
+
+## References
+
+- Architecture: `docs/03-architecture/ARCHITECTURE.md`
+- API Spec: `docs/02-api/OPENAPI.md`
+- Setup Guide: `docs/04-dev/SETUP.md`
+- Contributing: `docs/04-dev/CONTRIBUTING.md`
+- Reference structure: `E:/coqnit/cqtpos-be` (use as reference but improve upon)
