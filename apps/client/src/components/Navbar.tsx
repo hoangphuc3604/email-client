@@ -95,7 +95,7 @@ function NavBar() {
             <Nav.Item>
               <Nav.Link
                 as={Link}
-                to="/resume"
+                to="/signup"
                 onClick={() => updateExpanded(false)}
               >
                 <ImBlog style={{ marginBottom: "2px" }} /> Sign up
