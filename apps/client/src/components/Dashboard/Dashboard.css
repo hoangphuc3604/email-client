@@ -1,0 +1,153 @@
+/* Làm cho section dashboard chiếm toàn bộ không gian còn lại */
+.dashboard-section {
+  position: relative !important;
+  padding-top: 50px !important; /* Tăng padding để không bị navbar che */
+  padding-bottom: 30px !important;
+  min-height: 100%; /* Chiều cao tối thiểu */
+  color: white;
+}
+
+/* Container chính của dashboard */
+.dashboard-container {
+  max-width: 100%;
+  height: calc(85vh - 50px); /* Chiều cao tùy chỉnh */
+  margin-top: 20px;
+}
+
+/* Hàng (Row) chính chứa 3 cột */
+.dashboard-row {
+  height: 100%;
+  background-color: rgba(27, 26, 46, 0.8); /* Nền mờ */
+  border-radius: 10px;
+  overflow: hidden; /* Ngăn các cột tràn ra ngoài */
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* Định dạng chung cho các cột */
+.folder-column,
+.email-list-column,
+.email-detail-column {
+  height: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.column-title {
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Cột 1: Thư mục */
+.folder-column {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.folder-column .list-group-item {
+  background-color: transparent;
+  color: white;
+  border: none;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+}
+.folder-column .list-group-item svg {
+  margin-right: 10px;
+}
+.folder-column .list-group-item.active {
+  background-color: var(--imp-text-color); /* Màu tím từ style.css */
+  border-color: var(--imp-text-color);
+}
+.folder-column .list-group-item:hover:not(.active) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Cột 2: Danh sách email */
+.email-list-column {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+.column-actions {
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.email-list-group {
+  overflow-y: auto; /* Cho phép cuộn danh sách email */
+  flex-grow: 1;
+}
+.email-list-group .list-group-item {
+  background-color: transparent;
+  color: white;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+}
+.email-list-group .list-group-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+.email-item-sender {
+  font-weight: bold;
+}
+.email-item-subject {
+  color: #ddd;
+}
+.email-item-preview {
+  font-size: 0.9em;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.email-list-group .list-group-item.unread {
+  background-color: rgba(199, 112, 240, 0.1); /* Hơi tím cho thư chưa đọc */
+  font-weight: bold;
+}
+
+/* Cột 3: Chi tiết email */
+/* --- TÌM VÀ THAY THẾ CÁC CLASS NÀY TRONG DASHBOARD.CSS --- */
+
+/* Cột 3: Chi tiết email */
+.email-detail-column {
+  /* XÓA: overflow-y: auto; */
+  /* Thêm 3 dòng này: */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #aaa;
+}
+
+.email-detail-card {
+  height: 100%;
+  background-color: transparent;
+  color: white;
+  border: none;
+  border-radius: 0;
+  /* Thêm 2 dòng này để Card.Body co giãn */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Thêm class 'card-body' vào đây */
+.email-detail-card .card-body {
+  flex-grow: 1; /* Cho phép co giãn */
+  overflow-y: auto; /* Thêm thanh cuộn CHỈ ở đây */
+}
+
+.email-detail-actions {
+  background-color: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-shrink: 0; /* Ngăn header bị co lại */
+}
+
+.email-body {
+  font-size: 1rem;
+  line-height: 1.6;
+}

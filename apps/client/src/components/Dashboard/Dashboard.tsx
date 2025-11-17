@@ -1,91 +1,172 @@
-import React from "react";
-import { Container, Row, Col } from "react-bootstrap";
-import ProjectCard from "./ProjectCards";
+import React, { useState } from "react";
+import {
+  Container,
+  Row,
+  Col,
+  ListGroup,
+  Card,
+  Button,
+  Badge,
+} from "react-bootstrap";
 import Particle from "../Particle";
-import leaf from "../../Assets/Projects/leaf.png";
-import emotion from "../../Assets/Projects/emotion.png";
-import editor from "../../Assets/Projects/codeEditor.png";
-import chatify from "../../Assets/Projects/chatify.png";
-import suicide from "../../Assets/Projects/suicide.png";
-import bitsOfCode from "../../Assets/Projects/blog.png";
+import "./Dashboard.css"; // Chúng ta sẽ tạo file này
+import {
+  FaInbox,
+  FaStar,
+  FaPaperPlane,
+  FaEdit,
+  FaTrash,
+  FaSync,
+  FaReply,
+  FaForward,
+} from "react-icons/fa";
 
-function Projects() {
+// Dữ liệu mock cho Cột 2
+const mockEmails = [
+  // ... (Dữ liệu mockEmails giữ nguyên, không thay đổi) ...
+  {
+    id: 1,
+    sender: "Alice Smith",
+    subject: "Meeting Update",
+    preview: "Hi team, the meeting time has been changed to 3 PM...",
+    read: false,
+  },
+  {
+    id: 2,
+    sender: "Google",
+    subject: "Security Alert",
+    preview: "A new device signed into your account. Please review...",
+    read: false,
+  },
+  {
+    id: 3,
+    sender: "Bob Johnson",
+    subject: "Project Files",
+    preview: "Here are the files you requested for the G03 project.",
+    read: true,
+  },
+];
+
+// Dữ liệu mock cho Cột 3
+const mockEmailDetail = {
+  // ... (Dữ liệu mockEmailDetail giữ nguyên, không thay đổi) ...
+  id: 2,
+  from: "security-noreply@google.com",
+  to: "you@example.com",
+  subject: "Security Alert",
+  body: `
+    <p>Hi,</p>
+    <p>A new device (Windows 11, Chrome) signed into your account.</p>
+    <p>If this was you, no action is needed. If you don't recognize this activity, please secure your account immediately.</p>
+    <br/>
+    <p>Thanks,</p>
+    <p>The Google Team</p>
+  `,
+};
+
+function Dashboard() {
+  const [selectedEmail, setSelectedEmail] = useState(mockEmailDetail); // Hiển thị email đầu tiên
+
   return (
-    <Container fluid className="project-section">
+    <Container fluid className="dashboard-section">
       <Particle />
-      <Container>
-        <h1 className="project-heading">
-          My Recent <strong className="purple">Works </strong>
-        </h1>
-        <p style={{ color: "white" }}>
-          Here are a few projects I've worked on recently.
-        </p>
-        <Row style={{ justifyContent: "center", paddingBottom: "10px" }}>
-          <Col md={4} className="project-card">
-            <ProjectCard
-              imgPath={chatify}
-              isBlog={false}
-              title="Chatify"
-              description="Personal Chat Room or Workspace to share resources and hangout with friends build with react.js, Material-UI, and Firebase. Have features which allows user for realtime messaging, image sharing as well as supports reactions on messages."
-              ghLink="https://github.com/soumyajit4419/Chatify"
-              demoLink="https://chatify-49.web.app/"
-            />
+      <Container className="dashboard-container">
+        {/* Hàng (Row) chính chứa 3 cột */}
+        <Row className="dashboard-row">
+          {/* CỘT 1: THƯ MỤC (Folders) */}
+          <Col md={2} className="folder-column">
+            {/* ... (Nội dung Cột 1 giữ nguyên) ... */}
+            <h5 className="column-title">Mailboxes</h5>
+            <ListGroup variant="flush">
+              <ListGroup.Item action active>
+                <FaInbox /> Inbox
+                <Badge bg="danger" pill className="ms-2">
+                  2
+                </Badge>
+              </ListGroup.Item>
+              <ListGroup.Item action>
+                <FaStar /> Starred
+              </ListGroup.Item>
+              <ListGroup.Item action>
+                <FaPaperPlane /> Sent
+              </ListGroup.Item>
+              <ListGroup.Item action>
+                <FaEdit /> Drafts
+              </ListGroup.Item>
+              <ListGroup.Item action>
+                <FaTrash /> Trash
+              </ListGroup.Item>
+            </ListGroup>
           </Col>
 
-          <Col md={4} className="project-card">
-            <ProjectCard
-              imgPath={bitsOfCode}
-              isBlog={false}
-              title="Bits-0f-C0de"
-              description="My personal blog page build with Next.js and Tailwind Css which takes the content from makdown files and renders it using Next.js. Supports dark mode and easy to write blogs using markdown."
-              ghLink="https://github.com/soumyajit4419/Bits-0f-C0de"
-              demoLink="https://blogs.soumya-jit.tech/"
-            />
+          {/* CỘT 2: DANH SÁCH EMAIL (Email List) */}
+          <Col md={4} className="email-list-column">
+            {/* ... (Nội dung Cột 2 giữ nguyên) ... */}
+            <div className="column-actions">
+              <Button variant="primary">Compose</Button>
+              <Button variant="outline-secondary" className="ms-2">
+                <FaSync />
+              </Button>
+            </div>
+            <ListGroup variant="flush" className="email-list-group">
+              {mockEmails.map((email) => (
+                <ListGroup.Item
+                  key={email.id}
+                  action
+                  // onClick={() => setSelectedEmail(email)}
+                  className={email.read ? "read" : "unread"}
+                >
+                  <div className="email-item-sender">{email.sender}</div>
+                  <div className="email-item-subject">{email.subject}</div>
+                  <div className="email-item-preview">{email.preview}</div>
+                </ListGroup.Item>
+              ))}
+            </ListGroup>
           </Col>
 
-          <Col md={4} className="project-card">
-            <ProjectCard
-              imgPath={editor}
-              isBlog={false}
-              title="Editor.io"
-              description="Online code and markdown editor build with react.js. Online Editor which supports html, css, and js code with instant view of website. Online markdown editor for building README file which supports GFM, Custom Html tags with toolbar and instant preview.Both the editor supports auto save of work using Local Storage"
-              ghLink="https://github.com/soumyajit4419/Editor.io"
-              demoLink="https://editor.soumya-jit.tech/"              
-            />
-          </Col>
-
-          <Col md={4} className="project-card">
-            <ProjectCard
-              imgPath={leaf}
-              isBlog={false}
-              title="Plant AI"
-              description="Used the plant disease dataset from Kaggle and trained a image classifer model using 'PyTorch' framework using CNN and Transfer Learning with 38 classes of various plant leaves. The model was successfully able to detect diseased and healthy leaves of 14 unique plants. I was able to achieve an accuracy of 98% by using Resnet34 pretrained model."
-              ghLink="https://github.com/soumyajit4419/Plant_AI"
-              demoLink="https://plant49-ai.herokuapp.com/"
-            />
-          </Col>
-
-          <Col md={4} className="project-card">
-            <ProjectCard
-              imgPath={suicide}
-              isBlog={false}
-              title="Ai For Social Good"
-              description="Using 'Natural Launguage Processing' for the detection of suicide-related posts and user's suicide ideation in cyberspace  and thus helping in sucide prevention."
-              ghLink="https://github.com/soumyajit4419/AI_For_Social_Good"
-              // demoLink="https://www.youtube.com/watch?v=dQw4w9WgXcQ&ab_channel=RickAstley" <--------Please include a demo link here
-            />
-          </Col>
-
-          <Col md={4} className="project-card">
-            <ProjectCard
-              imgPath={emotion}
-              isBlog={false}
-              title="Face Recognition and Emotion Detection"
-              description="Trained a CNN classifier using 'FER-2013 dataset' with Keras and tensorflow backened. The classifier sucessfully predicted the various types of emotions of human. And the highest accuracy obtained with the model was 60.1%.
-              Then used Open-CV to detect the face in an image and then pass the face to the classifer to predict the emotion of a person."
-              ghLink="https://github.com/soumyajit4419/Face_And_Emotion_Detection"
-              // demoLink="https://blogs.soumya-jit.tech/"      <--------Please include a demo link here 
-            />
+          {/* CỘT 3: CHI TIẾT EMAIL (Email Detail) */}
+          <Col md={6} className="email-detail-column">
+            {!selectedEmail ? (
+              // Trạng thái rỗng
+              <div className="empty-state">
+                <FaInbox size={50} />
+                <p>Select an email to view details</p>
+              </div>
+            ) : (
+              // Hiển thị chi tiết email
+              <Card className="email-detail-card">
+                <Card.Header className="email-detail-actions">
+                  <Button variant="outline-secondary">
+                    <FaReply /> Reply
+                  </Button>
+                  <Button variant="outline-secondary" className="ms-2">
+                    <FaForward /> Forward
+                  </Button>
+                  <Button variant="outline-danger" className="ms-auto">
+                    <FaTrash />
+                  </Button>
+                </Card.Header>
+                <Card.Body>
+                  <Card.Title>{selectedEmail.subject}</Card.Title>
+                  
+                  {/* === THAY ĐỔI Ở ĐÂY === */}
+                  {/* Đã xóa class 'text-muted' để chữ có màu sáng (trắng) */}
+                  <Card.Subtitle className="mb-2">
+                    <strong>From:</strong> {selectedEmail.from}
+                    <br />
+                    <strong>To:</strong> {selectedEmail.to}
+                  </Card.Subtitle>
+                  {/* === KẾT THÚC THAY ĐỔI === */}
+                  
+                  <hr />
+                  <div
+                    className="email-body"
+                    // Render HTML từ mock data
+                    dangerouslySetInnerHTML={{ __html: selectedEmail.body }}
+                  />
+                </Card.Body>
+              </Card>
+            )}
           </Col>
         </Row>
       </Container>
@@ -93,4 +174,4 @@ function Projects() {
   );
 }
 
-export default Projects;
+export default Dashboard;
