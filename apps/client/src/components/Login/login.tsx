@@ -14,7 +14,7 @@ function Login() {
         </div>
         <div className="login_box">
           <h2>Login</h2>
-          <input type="text" placeholder="User Name" />
+          <input type="text" placeholder="Email" />
           <input className="mt_20" type="password" placeholder="Password" />
           <button className="mt_20" type="submit">
             Sign in
