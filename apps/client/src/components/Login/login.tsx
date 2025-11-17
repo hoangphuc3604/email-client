@@ -37,9 +37,6 @@ function Login() {
             <a className="mt_20" href="#">
               Forget Password
             </a>
-            <a className="mt_20" href="#">
-              Sign Up Again
-            </a>
           </div>
         </div>
       </div>
