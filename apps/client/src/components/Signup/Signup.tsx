@@ -1,65 +1,60 @@
-import { useState, useEffect } from "react";
-import { Container, Row } from "react-bootstrap";
-import Button from "react-bootstrap/Button";
-import Particle from "../Particle";
-import pdf from "../../Assets/Soumyajit_Behera.pdf"; // Đã sửa đường dẫn PDF
-import { AiOutlineDownload } from "react-icons/ai";
-import { Document, Page, pdfjs } from "react-pdf";
-import "react-pdf/dist/Page/AnnotationLayer.css";
-import "react-pdf/dist/Page/TextLayer.css";
-// Dòng "import ./pdfStyles.css;" đã bị xóa vì file không tồn tại
-
-// Sử dụng CDN để tải worker, đơn giản và hiệu quả hơn
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+import "./signup.css"; // Import file CSS
+import { useNavigate } from "react-router-dom"; // <--- THÊM IMPORT NÀY
 
 function Signup() {
-  const [width, setWidth] = useState(1200);
+  const navigate = useNavigate(); // <--- KHỞI TẠO HOOK
 
-  useEffect(() => {
-    setWidth(window.innerWidth);
-  }, []);
+  // Hàm xử lý khi nhấn nút Sign In
+  const handleNavigateToLogin = () => {
+    navigate("/login"); // <--- CHUYỂN ĐẾN TRANG /login (bạn có thể đổi path nếu cần)
+  };
 
   return (
-    <div>
-      <Container fluid className="resume-section">
-        <Particle />
-        <Row style={{ justifyContent: "center", position: "relative" }}>
-          <Button
-            variant="primary"
-            href={pdf}
-            target="_blank"
-            style={{ maxWidth: "250px" }}
-          >
-            <AiOutlineDownload />
-            &nbsp;Download CV
-          </Button>
-        </Row>
+    // Đã đổi tên class này
+    <div className="signup_wrap_container">
+      {/* Đã đổi tên class này */}
+      <div className="signup_wrap">
+        <div className="ring">
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+        {/* Đã đổi tên class này */}
+        <div className="signup_box">
+          <h2>Sign Up</h2>
+          <input type="text" placeholder="User Name" />
+          <input className="mt_20" type="email" placeholder="Email" />
+          <input
+            className="mt_20"
+            type="password"
+            placeholder="Create Password"
+          />
+          <input
+            className="mt_20"
+            type="password"
+            placeholder="Confirm Password"
+          />
+          <button className="mt_20" type="submit">
+            Sign Up
+          </button>
 
-        <Row className="resume">
-          <Document file={pdf} className="d-flex justify-content-center">
-            {/* Thêm xử lý lỗi và loading cho Document */}
-            <Page
-              pageNumber={1}
-              scale={width > 786 ? 1.7 : 0.6}
-              onLoadError={(error) =>
-                console.error("Error while loading page!", error)
-              }
-            />
-          </Document>
-        </Row>
+          {/* --- PHẦN ĐÃ THAY ĐỔI BẮT ĐẦU TỪ ĐÂY --- */}
 
-        <Row style={{ justifyContent: "center", position: "relative" }}>
-          <Button
-            variant="primary"
-            href={pdf}
-            target="_blank"
-            style={{ maxWidth: "250px" }}
+          {/* Dải phân cách "or" */}
+          <div className="divider mt_20">or</div>
+
+          {/* Nút Sign In mới */}
+          <button
+            type="button" // Quan trọng: không phải 'submit'
+            className="mt_20"
+            onClick={handleNavigateToLogin} // <--- GỌI HÀM KHI NHẤN
           >
-            <AiOutlineDownload />
-            &nbsp;Download CV
-          </Button>
-        </Row>
-      </Container>
+            Sign In
+          </button>
+
+          {/* --- KẾT THÚC PHẦN THAY ĐỔI --- */}
+        </div>
+      </div>
     </div>
   );
 }

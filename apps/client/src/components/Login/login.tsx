@@ -1,65 +1,48 @@
-import { useState, useEffect } from "react";
-import { Container, Row } from "react-bootstrap";
-import Button from "react-bootstrap/Button";
-import Particle from "../Particle";
-import pdf from "../../Assets/Soumyajit_Behera.pdf"; // Đã sửa đường dẫn PDF
-import { AiOutlineDownload } from "react-icons/ai";
-import { Document, Page, pdfjs } from "react-pdf";
-import "react-pdf/dist/Page/AnnotationLayer.css";
-import "react-pdf/dist/Page/TextLayer.css";
-// Dòng "import ./pdfStyles.css;" đã bị xóa vì file không tồn tại
-
-// Sử dụng CDN để tải worker, đơn giản và hiệu quả hơn
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+import "./login.css"; // Import file CSS cho template
+import { FcGoogle } from "react-icons/fc"; // <--- THÊM IMPORT NÀY
 
 function Login() {
-  const [width, setWidth] = useState(1200);
-
-  useEffect(() => {
-    setWidth(window.innerWidth);
-  }, []);
-
   return (
-    <div>
-      <Container fluid className="resume-section">
-        <Particle />
-        <Row style={{ justifyContent: "center", position: "relative" }}>
-          <Button
-            variant="primary"
-            href={pdf}
-            target="_blank"
-            style={{ maxWidth: "250px" }}
-          >
-            <AiOutlineDownload />
-            &nbsp;Download CV
-          </Button>
-        </Row>
+    <div className="login_wrap_container">
+      {" "}
+      {/* Thêm container để CSS overflow: hidden hoạt động đúng */}
+      <div className="login_wrap">
+        <div className="ring">
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+        <div className="login_box">
+          <h2>Login</h2>
+          <input type="text" placeholder="User Name" />
+          <input className="mt_20" type="password" placeholder="Password" />
+          <button className="mt_20" type="submit">
+            Sign in
+          </button>
 
-        <Row className="resume">
-          <Document file={pdf} className="d-flex justify-content-center">
-            {/* Thêm xử lý lỗi và loading cho Document */}
-            <Page
-              pageNumber={1}
-              scale={width > 786 ? 1.7 : 0.6}
-              onLoadError={(error) =>
-                console.error("Error while loading page!", error)
-              }
-            />
-          </Document>
-        </Row>
+          {/* --- PHẦN MỚI THÊM BẮT ĐẦU TỪ ĐÂY --- */}
 
-        <Row style={{ justifyContent: "center", position: "relative" }}>
-          <Button
-            variant="primary"
-            href={pdf}
-            target="_blank"
-            style={{ maxWidth: "250px" }}
-          >
-            <AiOutlineDownload />
-            &nbsp;Download CV
-          </Button>
-        </Row>
-      </Container>
+          {/* Dải phân cách "or" */}
+          <div className="divider mt_20">or</div>
+
+          {/* Nút Login with Google */}
+          <button type="button" className="btn-google mt_20">
+            <FcGoogle /> {/* <--- Icon Google */}
+            Login with Google
+          </button>
+
+          {/* --- KẾT THÚC PHẦN MỚI THÊM --- */}
+
+          <div className="custom_flex">
+            <a className="mt_20" href="#">
+              Forget Password
+            </a>
+            <a className="mt_20" href="#">
+              Sign Up Again
+            </a>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
