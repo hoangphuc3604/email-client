@@ -9,42 +9,43 @@ function Home2() {
         <Row>
           <Col md={8} className="home-about-description">
             <h1 style={{ fontSize: "2.6em" }}>
-              LET ME <span className="purple"> INTRODUCE </span> MYSELF
+              LET ME <span className="purple"> INTRODUCE </span> OUR PROJECT
             </h1>
             <p className="home-about-body">
-              I’m a Software Engineer who loves transforming ideas into
-              reliable, scalable products. Over time, I’ve explored several
-              technologies and found my passion in building high-performance
-              systems and intuitive user experiences.
-              <br />
-              <br />
-              I’m proficient in
-              <i>
-                <b className="purple">
-                  {" "}
-                  JavaScript, C++, Rust, Node.js, and Java{" "}
-                </b>
-              </i>
-              — and I enjoy working across both backend and frontend stacks.
-              <br />
-              <br />
-              My key areas of interest include developing
-              <i>
-                <b className="purple">
-                  {" "}
-                  Web Applications, Blockchain Solutions,{" "}
-                </b>
-              </i>
-              and exploring new ways to bridge on-chain and off-chain systems.
-              <br />
-              <br />
-              Whenever possible, I love building projects with
-              <b className="purple"> Node.js </b> and modern frameworks like{" "}
-              <i>
-                <b className="purple">React.js</b> and{" "}
-                <b className="purple">Next.js</b>.
-              </i>
-            </p>
+            I’m developing a smart and modern Email Management System designed to make handling emails easier, faster, and more organized.
+            <br />
+            <br />
+            Throughout this project, I’ve focused on building tools that improve productivity through features like automated sorting, email categorization, analytics, and secure message handling.
+            <br />
+            <br />
+            This platform is powered by
+            <i>
+              <b className="purple">
+                {" "}
+                Node.js, React.js, Express, and MongoDB{" "}
+              </b>
+            </i>
+            — ensuring reliability, scalability, and a smooth user experience.
+            <br />
+            <br />
+            I’m passionate about creating
+            <i>
+              <b className="purple">
+                {" "}
+                efficient email workflows, real-time monitoring,{" "}
+              </b>
+            </i>
+            and building tools that help users stay organized and work more efficiently every day.
+            <br />
+            <br />
+            Whenever possible, I focus on crafting clean UI experiences with
+            <b className="purple"> React.js </b> and building secure, high-performance services using{" "}
+            <i>
+              <b className="purple">Node.js</b> and{" "}
+              <b className="purple">modern backend architectures</b>.
+            </i>
+          </p>
+
           </Col>
           <Col md={4} className="myAvtar">
             <Tilt>

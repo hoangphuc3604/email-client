@@ -1,4 +1,3 @@
-import React from "react";
 import Typewriter from "typewriter-effect";
 
 function Type() {
@@ -6,10 +5,10 @@ function Type() {
     <Typewriter
       options={{
         strings: [
-          "Software Developer",
-          "Freelancer",
-          "MERN Stack Developer",
-          "Open Source Contributor",
+          "Manage Your Emails Effortlessly",
+          "Organize. Filter. Automate.",
+          "Smart Spam Protection",
+          "Fast & Secure Email System",
         ],
         autoStart: true,
         loop: true,

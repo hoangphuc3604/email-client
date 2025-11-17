@@ -12,7 +12,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 // Sử dụng CDN để tải worker, đơn giản và hiệu quả hơn
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
-function ResumeNew() {
+function Login() {
   const [width, setWidth] = useState(1200);
 
   useEffect(() => {
@@ -64,4 +64,4 @@ function ResumeNew() {
   );
 }
 
-export default ResumeNew;
+export default Login;
