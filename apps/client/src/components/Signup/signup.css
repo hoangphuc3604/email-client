@@ -1,0 +1,205 @@
+@import url("https://fonts.googleapis.com/css?family=Poppins:400,500,700&display=swap");
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+button:focus,
+input:focus,
+textarea:focus {
+  outline: 0;
+}
+
+/* Đã đổi tên class */
+.signup_wrap_container {
+  background: #181a1b;
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 26px;
+  font-family: "Poppins", sans-serif;
+  overflow: hidden; /* Ngăn thanh cuộn */
+  width: 100%;
+  height: 100vh;
+  display: flex; /* Dùng flex để căn giữa */
+  align-items: center;
+  justify-content: center;
+}
+
+/* Đã đổi tên class */
+.signup_wrap {
+  max-width: 500px;
+  width: 100%;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* Đã đổi tên class cha */
+.signup_wrap .ring {
+  width: 500px;
+  height: 500px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Đã đổi tên class cha */
+.signup_wrap .ring i {
+  border: 2px solid #ffffff;
+  transition: 0.5s;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 110%;
+  height: 110%;
+}
+
+/* Đã đổi tên class cha */
+.signup_wrap:hover .ring i:nth-child(1) {
+  border: 6px solid #9ed4fc;
+  filter: drop-shadow(0 0 20px #9ed4fc);
+}
+
+.signup_wrap .ring i:nth-child(1) {
+  border-radius: 38% 62% 63% 37% / 41% 44% 56% 59%;
+  animation: animate1 6s linear infinite;
+}
+
+.signup_wrap:hover .ring i:nth-child(2) {
+  border: 6px solid #ff0057;
+  filter: drop-shadow(0 0 20px #ff0057);
+}
+
+.signup_wrap .ring i:nth-child(2) {
+  border-radius: 41% 44% 56% 59% / 38% 62% 63% 37%;
+  animation: animate1 6s linear infinite;
+}
+
+.signup_wrap .ring i:nth-child(3) {
+  border-radius: 41% 44% 56% / 38% 62% 63% 37%;
+  animation: animate2 6s linear infinite;
+}
+
+.signup_wrap:hover .ring i:nth-child(3) {
+  border: 6px solid #d081f7;
+  filter: drop-shadow(0 0 20px #d081f7);
+}
+
+/* Đã đổi tên class */
+.signup_wrap .signup_box {
+  width: 300px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 11;
+}
+
+/* Đã đổi tên class cha */
+.signup_wrap h2 {
+  font-size: 30px;
+  font-weight: 600;
+  text-align: center;
+  padding-bottom: 10px;
+}
+
+.signup_wrap input {
+  width: 100%;
+  height: 50px;
+  border: 1px solid #ffffff;
+  padding-left: 15px;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 500;
+  border-radius: 5px;
+  background: transparent;
+}
+
+.signup_wrap input::Placeholder {
+  color: #ffffff;
+}
+
+.mt_20 {
+  margin-top: 10px;
+}
+
+.signup_wrap button {
+  width: 100%;
+  height: 45px;
+  border: transparent;
+  background: linear-gradient(90deg, #9ed4fc 0.1%, #d081f7 98.06%);
+  cursor: pointer;
+  border-radius: 5px;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 500;
+  transition: 0.5s;
+}
+
+.signup_wrap button:hover {
+  background: linear-gradient(90deg, #d081f7 0.1%, #9ed4fc 98.06%);
+}
+
+.signup_wrap .custom_flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.signup_wrap .custom_flex a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  transition: 0.3s;
+}
+
+.signup_wrap .custom_flex a:hover {
+  text-decoration: underline;
+}
+
+@keyframes animate1 {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes animate2 {
+  0% {
+    transform: rotate(360deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+/* --- THÊM VÀO CUỐI FILE SIGNUP.CSS --- */
+
+/* Kiểu cho dải phân cách "or" */
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: #ffffff;
+  font-size: 14px;
+}
+
+/* Đường kẻ bên trái */
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid #ffffff;
+}
+
+/* Khoảng cách 2 bên chữ "or" */
+.divider:not(:empty)::before {
+  margin-right: 0.5em;
+}
+
+.divider:not(:empty)::after {
+  margin-left: 0.5em;
+}
