@@ -5,9 +5,10 @@ from app.api.auth.models import (
     LoginRequest, 
     GoogleAuthRequest, 
     AuthResponseWithoutRefreshToken,
-    TokenResponse
+    TokenResponse,
+    UserInfo,
 )
-from app.api.auth.dependencies import get_auth_service
+from app.api.auth.dependencies import get_auth_service, get_current_user
 from app.models.api_response import APIResponse
 from app.utils.cookie import get_cookie_settings
 
@@ -159,3 +160,11 @@ async def logout(
     )
     
     return APIResponse(data=None, message="Logged out successfully")
+
+
+@router.get("/me", response_model=APIResponse[UserInfo])
+async def me(
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Return current authenticated user's info (requires Bearer access token)"""
+    return APIResponse(data=current_user, message="Current user retrieved")
