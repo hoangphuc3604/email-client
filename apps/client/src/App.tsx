@@ -9,6 +9,7 @@ import Footer from "./components/Footer";
 import Resume from "./components/Resume/ResumeNew";
 
 import Login from "./components/Login/login";
+import GoogleCallback from "./components/Login/GoogleCallback";
 import Signup from "./components/Signup/Signup";
 import {
   BrowserRouter as Router,
@@ -45,6 +46,7 @@ function App() {
           <Route path="/about" element={<About />} />
           <Route path="/resume" element={<Resume />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/google-callback" element={<GoogleCallback />} />
 
           <Route path="/signup" element={<Signup />} />
           <Route path="*" element={<Navigate to="/"/>} />

@@ -36,3 +36,8 @@ export const me = async () => {
   const res = await api.get('/auth/me')
   return res.data
 }
+
+export const google = async (payload: { credential: string }) => {
+  const res = await api.post('/auth/google', payload)
+  return res.data
+}
