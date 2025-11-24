@@ -150,6 +150,7 @@ async def refresh_token(
 
 @router.post("/logout", response_model=APIResponse[None])
 async def logout(
+    request: Request = None,
     response: Response = None,
     refresh_token: str = Cookie(None, alias="refresh_token"),
     auth_service: AuthService = Depends(get_auth_service)
@@ -160,9 +161,10 @@ async def logout(
         except:
             pass
     
+    cookie_settings = get_cookie_settings(request)
     response.delete_cookie(
         key="refresh_token",
-        path="/api/v1/auth"
+        path=cookie_settings["path"]
     )
     
     return APIResponse(data=None, message="Logged out successfully")
