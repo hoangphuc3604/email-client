@@ -16,7 +16,7 @@ if settings.ENVIRONMENT == "development":
     root_path = ""
     router_prefix = ""
 else:
-    root_path = "/api/v1"
+    root_path = ""
     router_prefix = "/api/v1"
 
 # Configure logging
