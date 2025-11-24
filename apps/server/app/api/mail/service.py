@@ -45,7 +45,8 @@ class MailService:
       client_secret=settings.GOOGLE_CLIENT_SECRET
     )
 
-    return build("gmail", "v1", credentials=creds)
+    # Disable cache to avoid oauth2client<4.0.0 warning and crashes
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
   async def get_mailboxes(self, user_id: str):
     service = await self.get_gmail_service(user_id)
@@ -65,10 +66,13 @@ class MailService:
 
   async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50):
     service = await self.get_gmail_service(user_id)
+    
+    # Gmail API requires uppercase label IDs
+    gmail_label = mailbox_id.upper()
 
     results = service.users().messages().list(
       userId='me',
-      labelIds=[mailbox_id],
+      labelIds=[gmail_label],
       maxResults=limit,
       pageToken=page_token
     ).execute()

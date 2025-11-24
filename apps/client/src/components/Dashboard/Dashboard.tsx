@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Container,
   Row,
@@ -12,6 +12,7 @@ import {
 } from 'react-bootstrap'
 import Particle from '../Particle'
 import './Dashboard.css'
+import mailApi from '../../api/mail'
 import {
   FaInbox,
   FaStar,
@@ -22,8 +23,12 @@ import {
   FaSync,
   FaReply,
   FaForward,
+  FaCheckSquare,
+  FaEnvelopeOpen,
+  FaEnvelope,
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
+import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 
 const mockFolders = [
   { id: 'inbox', name: 'Inbox' },
@@ -33,52 +38,6 @@ const mockFolders = [
   { id: 'archive', name: 'Archive' },
   { id: 'trash', name: 'Trash' },
 ]
-
-function makeMockEmails(folderId: string) {
-  const base = [
-    {
-      id: `${folderId}-1`,
-      sender: 'Alice Smith',
-      subject: 'Meeting Update',
-      preview: 'Hi team, the meeting time has been changed to 3 PM...',
-      read: false,
-      starred: false,
-      timestamp: Date.now() - 1000 * 60 * 60,
-      body: '<p>Meeting moved to 3 PM. See you there.</p>',
-      attachments: [],
-    },
-    {
-      id: `${folderId}-2`,
-      sender: 'Google',
-      subject: 'Security Alert',
-      preview: "A new device signed into your account. Please review...",
-      read: false,
-      starred: true,
-      timestamp: Date.now() - 1000 * 60 * 60 * 24,
-      body:
-        "<p>A new device (Windows 11, Chrome) signed into your account. If this wasn't you, secure your account.</p>",
-      attachments: [],
-    },
-    {
-      id: `${folderId}-3`,
-      sender: 'Bob Johnson',
-      subject: 'Project Files',
-      preview: 'Here are the files you requested for the G03 project.',
-      read: true,
-      starred: false,
-      timestamp: Date.now() - 1000 * 60 * 60 * 48,
-      body: '<p>Files attached. Let me know if you need anything else.</p>',
-      attachments: [
-        { name: 'report.pdf', size: '120KB', url: '#' },
-      ],
-    },
-  ]
-
-  return Array.from({ length: 12 }).flatMap((_, i) => {
-    const item = base[i % base.length]
-    return [{ ...item, id: `${item.id}-${i}` }]
-  })
-}
 
 function timeAgo(ts: number) {
   const s = Math.floor((Date.now() - ts) / 1000)
@@ -90,39 +49,41 @@ function timeAgo(ts: number) {
 
 export default function Dashboard() {
   const [selectedFolder, setSelectedFolder] = useState('inbox')
-  const [emailsMap, setEmailsMap] = useState<Record<string, any[]>>(() => {
-    const inbox = makeMockEmails('inbox')
-    const starred = inbox.filter((e) => e.starred)
-    return {
-      inbox,
-      starred,
-      sent: makeMockEmails('sent'),
-      drafts: makeMockEmails('drafts'),
-      archive: makeMockEmails('archive'),
-      trash: makeMockEmails('trash'),
-    }
-  })
-
-  const [selectedEmail, setSelectedEmail] = useState<any | null>(
-    emailsMap['inbox']?.[0] ?? null,
-  )
+  const [masterEmails, setMasterEmails] = useState<any[]>([])
+  const [selectedEmail, setSelectedEmail] = useState<any | null>(null)
+  const [mailboxes, setMailboxes] = useState<any[]>([])
+  const [previewsMap, setPreviewsMap] = useState<Record<string, any[]>>({})
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
   const [showCompose, setShowCompose] = useState(false)
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
   const [cursorIndex, setCursorIndex] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadingEmail, setLoadingEmail] = useState(false)
   const listRef = useRef<HTMLDivElement | null>(null)
 
-  const emailList = useMemo(() => emailsMap[selectedFolder] || [], [emailsMap, selectedFolder])
-
-  const unreadInboxCount = useMemo(() => (emailsMap.inbox || []).filter((e) => !e.read).length, [emailsMap])
-  
-  // helper to mark a single email as selected (set cursor and selectedEmail)
-  function selectEmailByIndex(idx: number) {
-    const email = emailList[idx]
-    if (!email) return
-    setCursorIndex(idx)
-    openEmail(email)
+  // canonical folder selection similar to server: critical system labels first, then user labels, then starred, then inbox, then archive
+  function canonicalFolder(email: any) {
+    const labels = (email.labels || []).map((l: string) => ('' + l).toLowerCase())
+    const critical = ['trash', 'drafts', 'sent', 'spam']
+    for (const p of critical) if (labels.includes(p)) return p
+    // prefer user/custom labels (not the common system ones)
+    const common = new Set(['inbox', 'sent', 'drafts', 'trash', 'archive', 'spam', 'starred'])
+    for (const l of labels) if (!common.has(l)) return l
+    if (labels.includes('starred')) return 'starred'
+    if (labels.includes('inbox')) return 'inbox'
+    return 'archive'
   }
+
+  const emailList = useMemo(() => masterEmails.filter((e) => canonicalFolder(e) === selectedFolder), [masterEmails, selectedFolder])
+
+  const unreadInboxCount = useMemo(() => {
+    const inboxPreviews = previewsMap['inbox'] || []
+    return inboxPreviews.filter((e: any) => e.unread === true).length
+  }, [previewsMap])
+
+  const displayList = useMemo(() => {
+    return previewsMap[selectedFolder] || emailList
+  }, [previewsMap, emailList, selectedFolder])
 
   function selectFolder(id: string) {
     setSelectedFolder(id)
@@ -130,14 +91,114 @@ export default function Dashboard() {
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
+    setLoading(true)
+    // load folder previews from backend
+    loadFolderEmails(id)
   }
 
-  function openEmail(email: any) {
-    setSelectedEmail(email)
-    setEmailsMap((prev) => ({
-      ...prev,
-      [selectedFolder]: prev[selectedFolder].map((e) => (e.id === email.id ? { ...e, read: true } : e)),
-    }))
+  async function loadMailboxes() {
+    setLoading(true)
+    try {
+      const data = await mailApi.listMailboxes()
+      // data is array of {id,name,...}
+      // Filter to only show essential system labels
+      const essentialLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH', 'SPAM']
+      const filtered = (data || []).filter((box: any) => 
+        essentialLabels.includes(String(box.id).toUpperCase())
+      ).map((box: any) => ({
+        ...box,
+        id: String(box.id).toLowerCase(), // normalize to lowercase for UI
+        unreadCount: box.unread_count || 0
+      }))
+      setMailboxes(filtered.length > 0 ? filtered : mockFolders)
+      // load selected folder previews
+      await loadFolderEmails(selectedFolder)
+    } catch (e) {
+      console.error('Error loading mailboxes:', e)
+      // fallback to mock folders
+      setMailboxes(mockFolders)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function loadFolderEmails(folderId: string) {
+    try {
+      const res = await mailApi.listEmails(folderId)
+      // server returns { threads, total, previews, ... } or fallback mock structure
+      const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : null)
+      if (previews) {
+        setPreviewsMap((prev) => ({ ...prev, [folderId]: previews }))
+        // clear selection and cursor
+        setSelectedIds({})
+        setCursorIndex(0)
+        // Auto-open first email when entering a new section
+        if (previews.length > 0) {
+          await openEmail(previews[0])
+        }
+        return
+      }
+    } catch (err) {
+      console.error('Error loading folder emails:', err)
+    } finally {
+      setLoading(false)
+    }
+    // fallback: compute previews from masterEmails
+    const fallback = masterEmails.filter((e) => canonicalFolder(e) === folderId).map((e) => ({ id: e.id, subject: e.subject, sender: e.sender, body: e.preview || '', attachments: e.attachments || [], unread: !e.read }))
+    setPreviewsMap((prev) => ({ ...prev, [folderId]: fallback }))
+    // Auto-open first email for fallback as well
+    if (fallback.length > 0) {
+      await openEmail(fallback[0])
+    }
+    setLoading(false)
+  }
+
+  async function openEmail(email: any) {
+    setLoadingEmail(true)
+    // fetch full thread/detail from backend
+    try {
+      const data = await mailApi.getEmail(email.id)
+      console.log('Email detail response:', data)
+      // Backend returns { messages: [...], latest: {...}, ... }
+      // Use the latest message for display, or first message if no latest
+      const message = data.latest || data.messages?.[0] || data
+      const senderStr = typeof message.sender === 'string' 
+        ? message.sender 
+        : (message.sender?.name || message.sender?.email || 'Unknown')
+      
+      setSelectedEmail({
+        ...message,
+        sender: senderStr,
+        // Use processed_html if available, otherwise body
+        body: message.processed_html || message.body || message.decoded_body || '',
+        subject: message.subject || message.title || '(No Subject)',
+        to: message.to || [],
+        cc: message.cc || [],
+        attachments: message.attachments || []
+      })
+      // mark as read locally in previewsMap
+      setPreviewsMap((prev) => {
+        const folderPreviews = prev[selectedFolder] || []
+        const updated = folderPreviews.map((e: any) => 
+          e.id === email.id ? { ...e, unread: false } : e
+        )
+        return { ...prev, [selectedFolder]: updated }
+      })
+    } catch (err) {
+      console.error('Error loading email:', err)
+      // fallback to using the preview item as detail
+      const senderStr = typeof email.sender === 'string'
+        ? email.sender
+        : (email.sender?.name || email.sender?.email || 'Unknown')
+      setSelectedEmail({
+        ...email,
+        sender: senderStr,
+        body: email.body || email.preview || '',
+        to: []
+      })
+    } finally {
+      setLoadingEmail(false)
+    }
     setMobileView('detail')
   }
 
@@ -154,13 +215,15 @@ export default function Dashboard() {
   function deleteSelected() {
     const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
     if (ids.size === 0) return
-    setEmailsMap((prev) => {
-      const next: Record<string, any[]> = {}
-      for (const k of Object.keys(prev)) {
-        next[k] = prev[k].filter((e) => !ids.has(e.id))
+    // move selected threads to trash via backend modify, fallback to local removal
+    for (const id of Array.from(ids)) {
+      try {
+        mailApi.modifyEmail(id, { labels: ['trash'] })
+      } catch (e) {
+        // ignore
       }
-      return next
-    })
+    }
+    setMasterEmails((prev) => prev.filter((e) => !ids.has(e.id)))
     if (selectedEmail && ids.has(selectedEmail.id)) setSelectedEmail(null)
     setSelectedIds({})
   }
@@ -168,46 +231,30 @@ export default function Dashboard() {
   function markReadUnread(makeRead: boolean) {
     const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
     if (ids.size === 0) return
-    setEmailsMap((prev) => {
-      const next: Record<string, any[]> = {}
-      for (const k of Object.keys(prev)) {
-        next[k] = prev[k].map((e) => (ids.has(e.id) ? { ...e, read: makeRead } : e))
-      }
-      return next
-    })
+    for (const id of Array.from(ids)) {
+      try {
+        mailApi.modifyEmail(id, { unread: !makeRead })
+      } catch (e) {}
+    }
+    setMasterEmails((prev) => prev.map((e) => (ids.has(e.id) ? { ...e, read: makeRead } : e)))
     setSelectedIds({})
   }
 
   function toggleStar(email: any) {
-    const newStar = !email.starred
-    setEmailsMap((prev) => {
-      const next: Record<string, any[]> = {}
-      // update every folder's copy of the email if present
-      for (const k of Object.keys(prev)) {
-        next[k] = prev[k].map((e) => (e.id === email.id ? { ...e, starred: newStar } : e))
-      }
-      // maintain starred folder membership
-      if (newStar) {
-        const exists = next.starred.some((e) => e.id === email.id)
-        if (!exists) {
-          next.starred = [{ ...email, starred: true }, ...(next.starred || [])]
-        }
-      } else {
-        next.starred = (next.starred || []).filter((e) => e.id !== email.id)
-      }
-      return next
-    })
+    const hasStar = (email.labels || []).includes('starred')
+    const newLabels = hasStar ? (email.labels || []).filter((l: string) => l !== 'starred') : [...(email.labels || []), 'starred']
+    // update backend
+    try {
+      mailApi.modifyEmail(email.id, { labels: newLabels })
+    } catch (e) {}
+    setMasterEmails((prev) => prev.map((e) => (e.id === email.id ? { ...e, labels: newLabels } : e)))
+    // if current folder changed due to canonical mapping, refresh previews for affected folders
+    setTimeout(() => { loadFolderEmails(selectedFolder); loadFolderEmails('starred') }, 50)
   }
 
   function refreshFolder() {
-    setEmailsMap((prev) => {
-      const next = { ...prev, [selectedFolder]: makeMockEmails(selectedFolder) }
-      // if inbox refreshed, recompute starred from inbox
-      if (selectedFolder === 'inbox') {
-        next.starred = next.inbox.filter((e) => e.starred)
-      }
-      return next
-    })
+    // reload previews for current folder
+    loadFolderEmails(selectedFolder)
     setSelectedEmail(null)
     setSelectedIds({})
   }
@@ -216,19 +263,26 @@ export default function Dashboard() {
   const [composeSubject, setComposeSubject] = useState('')
   const [composeBody, setComposeBody] = useState('')
 
-  function sendCompose() {
-    const item = {
-      id: `sent-${Date.now()}`,
-      sender: 'You',
-      subject: composeSubject || '(no subject)',
-      preview: (composeBody || '').slice(0, 80),
-      read: true,
-      starred: false,
-      timestamp: Date.now(),
-      body: `<p>${composeBody}</p>`,
-      attachments: [],
+  async function sendCompose() {
+    try {
+      await mailApi.sendEmail({ to: composeTo, subject: composeSubject, body: composeBody })
+      // refresh sent folder
+      await loadFolderEmails('sent')
+    } catch (e) {
+      // fallback to local insert
+      const item = {
+        id: `m_${Date.now()}`,
+        sender: 'You',
+        subject: composeSubject || '(no subject)',
+        preview: (composeBody || '').slice(0, 80),
+        read: true,
+        labels: ['sent'],
+        timestamp: Date.now(),
+        body: `<p>${composeBody}</p>`,
+        attachments: [],
+      }
+      setMasterEmails((prev) => [item, ...prev])
     }
-    setEmailsMap((prev) => ({ ...prev, sent: [item, ...(prev.sent || [])] }))
     setShowCompose(false)
     setComposeTo('')
     setComposeSubject('')
@@ -254,11 +308,15 @@ export default function Dashboard() {
   }, [emailList, cursorIndex, mobileView])
 
   useEffect(() => {
-    const id = emailList[cursorIndex]?.id
+    const id = displayList[cursorIndex]?.id
     if (!id) return
     const el = document.getElementById(`email-row-${id}`)
     if (el) el.scrollIntoView({ block: 'nearest' })
-  }, [cursorIndex, emailList])
+  }, [cursorIndex, displayList])
+
+  useEffect(() => {
+    loadMailboxes()
+  }, [])
 
   return (
     <Container fluid className="dashboard-section">
@@ -274,80 +332,119 @@ export default function Dashboard() {
             </div>
 
             <ListGroup variant="flush" className="folders-list">
-              {mockFolders.map((f) => (
-                <ListGroup.Item key={f.id} action active={f.id === selectedFolder} onClick={() => selectFolder(f.id)}>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div>
-                      {f.id === 'inbox' && <FaInbox className="me-2" />}
-                      {f.id === 'starred' && <FaStar className="me-2" />}
-                      {f.id === 'sent' && <FaPaperPlane className="me-2" />}
-                      {f.id === 'drafts' && <FaEdit className="me-2" />}
-                      {f.id === 'trash' && <FaTrash className="me-2" />}
-                      {f.name}
+              {loading ? (
+                <div className="text-center p-3">
+                  <FaSync className="fa-spin" /> Loading...
+                </div>
+              ) : (
+                mailboxes.map((f: any) => (
+                  <ListGroup.Item key={f.id} action active={f.id === selectedFolder} onClick={() => selectFolder(f.id)}>
+                    <div className="d-flex justify-content-between align-items-center">
+                      <div>
+                        {String(f.id).toLowerCase() === 'inbox' && <FaInbox className="me-2" />}
+                        {String(f.id).toLowerCase() === 'starred' && <FaStar className="me-2" />}
+                        {String(f.id).toLowerCase() === 'sent' && <FaPaperPlane className="me-2" />}
+                        {String(f.id).toLowerCase() === 'draft' && <FaEdit className="me-2" />}
+                        {String(f.id).toLowerCase() === 'trash' && <FaTrash className="me-2" />}
+                        {f.name}
+                      </div>
+                      {String(f.id).toLowerCase() === 'inbox' && unreadInboxCount > 0 && (
+                        <Badge bg="danger">{unreadInboxCount}</Badge>
+                      )}
                     </div>
-                    {f.id === 'inbox' && unreadInboxCount > 0 && (
-                      <Badge bg="danger">{unreadInboxCount}</Badge>
-                    )}
-                  </div>
-                </ListGroup.Item>
-              ))}
+                  </ListGroup.Item>
+                ))
+              )}
             </ListGroup>
           </Col>
 
           <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
-            <div className="email-list-actions d-flex align-items-center mb-2">
-              <Button variant="primary" onClick={() => setShowCompose(true)} aria-label="Compose">
-                <BiEdit className="me-1" /> Compose
-              </Button>
-              <Button variant="light" className="ms-2" onClick={refreshFolder} aria-label="Refresh">
-                <FaSync />
-              </Button>
-              <Button variant="outline-secondary" className="ms-2" onClick={selectAllToggle} aria-label="Select all">
-                Select All
-              </Button>
-              <Button variant="outline-danger" className="ms-2" onClick={deleteSelected} aria-label="Delete selected">
-                Delete
-              </Button>
-              <Button variant="outline-secondary" className="ms-2" onClick={() => markReadUnread(true)} aria-label="Mark read">
-                Mark Read
-              </Button>
-              <Button variant="outline-secondary" className="ms-2" onClick={() => markReadUnread(false)} aria-label="Mark unread">
-                Mark Unread
-              </Button>
+            <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Compose</Tooltip>}>
+                <Button variant="primary" onClick={() => setShowCompose(true)} aria-label="Compose">
+                  <BiEdit />
+                </Button>
+              </OverlayTrigger>
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Refresh</Tooltip>}>
+                <Button variant="light" onClick={refreshFolder} aria-label="Refresh">
+                  <FaSync />
+                </Button>
+              </OverlayTrigger>
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Select All</Tooltip>}>
+                <Button variant="outline-secondary" onClick={selectAllToggle} aria-label="Select all">
+                  <FaCheckSquare />
+                </Button>
+              </OverlayTrigger>
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Delete</Tooltip>}>
+                <Button variant="outline-danger" onClick={deleteSelected} aria-label="Delete selected">
+                  <FaTrash />
+                </Button>
+              </OverlayTrigger>
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Mark as Read</Tooltip>}>
+                <Button variant="outline-secondary" onClick={() => markReadUnread(true)} aria-label="Mark read">
+                  <FaEnvelopeOpen />
+                </Button>
+              </OverlayTrigger>
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Mark as Unread</Tooltip>}>
+                <Button variant="outline-secondary" onClick={() => markReadUnread(false)} aria-label="Mark unread">
+                  <FaEnvelope />
+                </Button>
+              </OverlayTrigger>
             </div>
 
             <div className="email-list" ref={listRef}>
+              {loading ? (
+                <div className="text-center p-5">
+                  <FaSync className="fa-spin" size={32} />
+                  <p className="mt-3">Loading emails...</p>
+                </div>
+              ) : (
               <ListGroup variant="flush">
-                {emailList.map((email: any, idx: number) => (
-                  <ListGroup.Item
-                    id={`email-row-${email.id}`}
-                    key={email.id}
-                    action
-                    className={`email-row d-flex align-items-start ${email.read ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
-                    onClick={() => { setCursorIndex(idx); openEmail(email) }}
-                  >
-                    <div className="checkbox-col me-2">
-                      <Form.Check type="checkbox" checked={!!selectedIds[email.id]} onChange={() => toggleSelect(email.id)} />
-                    </div>
-                    <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
-                      {email.starred ? <FaStar /> : <FaRegStar />}
-                    </div>
-                    <div className="meta-col flex-fill">
-                      <div className="row-top d-flex justify-content-between">
-                        <div className="sender">{email.sender}</div>
-                        <div className="time">{timeAgo(email.timestamp)}</div>
+                {displayList.map((email: any, idx: number) => {
+                  const id = email.id
+                  const isRead = ('read' in email) ? !!email.read : (email.unread === false)
+                  const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
+                  const subject = email.subject || ''
+                  const preview = email.body || email.preview || ''
+                  const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
+                  const isStarred = ((email.labels || email.tags) || []).includes('starred')
+                  return (
+                    <ListGroup.Item
+                      id={`email-row-${id}`}
+                      key={id}
+                      action
+                      className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
+                      onClick={() => { setCursorIndex(idx); openEmail(email) }}
+                    >
+                      <div className="checkbox-col me-2">
+                        <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
                       </div>
-                      <div className="subject">{email.subject}</div>
-                      <div className="preview text-muted">{email.preview}</div>
-                    </div>
-                  </ListGroup.Item>
-                ))}
+                      <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
+                        {isStarred ? <FaStar /> : <FaRegStar />}
+                      </div>
+                      <div className="meta-col flex-fill">
+                        <div className="row-top d-flex justify-content-between">
+                          <div className="sender">{sender}</div>
+                          <div className="time">{timeAgo(ts)}</div>
+                        </div>
+                        <div className="subject">{subject}</div>
+                        <div className="preview text-muted">{preview}</div>
+                      </div>
+                    </ListGroup.Item>
+                  )
+                })}
               </ListGroup>
+              )}
             </div>
           </Col>
 
           <Col md={6} className={`email-detail-column ${mobileView === 'list' ? 'hide-on-mobile' : ''}`}>
-            {!selectedEmail ? (
+            {loadingEmail ? (
+              <div className="text-center mt-5">
+                <FaSync className="fa-spin" size={48} />
+                <p className="mt-3">Loading email...</p>
+              </div>
+            ) : !selectedEmail ? (
               <div className="empty-state text-center mt-5">
                 <FaInbox size={48} />
                 <p>Select an email to view details</p>
@@ -376,10 +473,70 @@ export default function Dashboard() {
                   <Card.Title>{selectedEmail.subject}</Card.Title>
                   <Card.Subtitle className="mb-2 text-muted">
                     <div><strong>From:</strong> {selectedEmail.sender}</div>
-                    <div><strong>To:</strong> you@example.com</div>
+                    {selectedEmail.to && selectedEmail.to.length > 0 && (
+                      <div><strong>To:</strong> {selectedEmail.to.map((t: any) => t.name || t.email).join(', ')}</div>
+                    )}
+                    {selectedEmail.cc && selectedEmail.cc.length > 0 && (
+                      <div><strong>Cc:</strong> {selectedEmail.cc.map((c: any) => c.name || c.email).join(', ')}</div>
+                    )}
                   </Card.Subtitle>
                   <hr />
-                  <div className="email-body" dangerouslySetInnerHTML={{ __html: selectedEmail.body }} />
+                  <div className="email-body-container">
+                    <iframe
+                      ref={(iframe) => {
+                        if (iframe) {
+                          const resizeIframe = () => {
+                            try {
+                              const doc = iframe.contentDocument || iframe.contentWindow?.document
+                              if (doc && doc.body) {
+                                const height = doc.body.scrollHeight
+                                iframe.style.height = Math.max(height + 32, 300) + 'px'
+                              }
+                            } catch (e) {
+                              // ignore cross-origin errors
+                            }
+                          }
+                          iframe.onload = resizeIframe
+                          setTimeout(resizeIframe, 100)
+                        }
+                      }}
+                      srcDoc={`
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <meta charset="utf-8">
+                            <style>
+                              body {
+                                margin: 0;
+                                padding: 16px;
+                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+                                font-size: 14px;
+                                line-height: 1.5;
+                                color: #333;
+                                background: transparent;
+                                word-wrap: break-word;
+                                overflow-wrap: break-word;
+                              }
+                              img { max-width: 100%; height: auto; }
+                              a { color: #0066cc; }
+                              pre { white-space: pre-wrap; }
+                              table { border-collapse: collapse; }
+                            </style>
+                          </head>
+                          <body>${selectedEmail.body}</body>
+                        </html>
+                      `}
+                      style={{
+                        width: '100%',
+                        minHeight: '300px',
+                        border: 'none',
+                        backgroundColor: 'white',
+                        display: 'block'
+                      }}
+                      sandbox="allow-same-origin"
+                      title="Email content"
+                    />
+                  </div>
 
                   {selectedEmail.attachments && selectedEmail.attachments.length > 0 && (
                     <div className="attachments mt-3">

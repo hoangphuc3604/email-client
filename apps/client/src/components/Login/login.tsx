@@ -12,6 +12,7 @@
     const mutation = useLogin()
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    const [isProcessingOAuth, setIsProcessingOAuth] = useState(false)
 
     const handleSubmit = (e: any) => {
       e.preventDefault()
@@ -25,6 +26,7 @@
     useEffect(() => {
       const code = searchParams.get('code')
       if (code) {
+        setIsProcessingOAuth(true)
         googleCodeMutation.mutate(code)
       }
     }, [searchParams])
@@ -186,6 +188,38 @@
     useEffect(() => {
       if (user) navigate('/dashboard')
     }, [user])
+
+    // Show loading screen during OAuth processing
+    if (isProcessingOAuth) {
+      return (
+        <div className="login_wrap_container">
+          <div className="login_wrap">
+            <div className="ring">
+              <i></i>
+              <i></i>
+              <i></i>
+            </div>
+            <div className="login_box" style={{ textAlign: 'center', padding: '40px' }}>
+              <div className="oauth-loading">
+                <div className="spinner" style={{
+                  width: '60px',
+                  height: '60px',
+                  margin: '0 auto 20px',
+                  border: '4px solid rgba(255, 255, 255, 0.1)',
+                  borderTop: '4px solid #fff',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite'
+                }}></div>
+                <h3 style={{ color: '#fff', marginBottom: '10px' }}>Signing you in...</h3>
+                <p style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '14px' }}>
+                  Please wait while we complete your authentication
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
 
     return (
       <div className="login_wrap_container">
