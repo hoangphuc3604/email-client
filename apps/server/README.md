@@ -50,7 +50,7 @@ uvicorn app.main:app --reload --port 8000
 app/
 ├── api/
 │   ├── auth/        # Authentication module (register, login, Google OAuth, refresh)
-│   ├── mail/        # Mail module - Mock API (to be implemented)
+│   ├── mail/        # Mail module - Gmail Integration
 │   └── router.py    # Main router
 ├── models/          # Global models
 │   └── api_response.py
@@ -74,8 +74,9 @@ All configuration is done via environment variables in `.env.local`. See `.env.t
 - `ACCESS_TOKEN_DURATION_MINUTE`: Access token expiry in minutes
 - `REFRESH_TOKEN_DURATION_DAY`: Refresh token expiry in days
 - `BASE_URL`: Base URL of the application
-- `GOOGLE_CLIENT_ID`: Google OAuth client ID (optional)
-- `GOOGLE_CLIENT_SECRET`: Google OAuth client secret (optional)
+- `GOOGLE_CLIENT_ID`: Google OAuth client ID
+- `GOOGLE_CLIENT_SECRET`: Google OAuth client secret
+- `FRONTEND_URL`: Comma-separated list of allowed frontend URLs for CORS
 
 ## Development
 
@@ -92,21 +93,23 @@ Follow PEP 8 and use type hints for all functions.
 ## API Endpoints
 
 ### Authentication
+- `GET /api/v1/auth/google/url` - Get Google OAuth2 authorization URL
 - `POST /api/v1/auth/register` - Register new user with email and password
 - `POST /api/v1/auth/login` - Email/password login
 - `POST /api/v1/auth/google` - Google OAuth sign-in
 - `POST /api/v1/auth/refresh` - Refresh access token
-- `GET /api/v1/auth/me` - Get current user (to be implemented)
-- `POST /api/v1/auth/logout` - Logout (to be implemented)
+- `POST /api/v1/auth/logout` - Logout
 
-### Mail - Mock API (To be implemented)
-- `GET /api/v1/mailboxes` - List mailboxes
-- `GET /api/v1/mailboxes/{mailbox_id}/emails` - List emails in mailbox
-- `GET /api/v1/mailboxes/emails/{email_id}` - Get email detail
+### Mail (Gmail Integration)
+- `GET /api/v1/mail/mailboxes` - List mailboxes/labels
+- `GET /api/v1/mail/mailboxes/{mailbox_id}/emails` - List emails in mailbox (paginated)
+- `GET /api/v1/mail/emails/{email_id}` - Get email detail
+- `POST /api/v1/mail/emails/send` - Send a new email
+- `POST /api/v1/mail/emails/{email_id}/reply` - Reply to an email
+- `POST /api/v1/mail/emails/{email_id}/modify` - Update email properties (read/unread, star, labels)
 
 ## Notes
 
-- The authentication and mail modules are to be implemented separately
-- Mock email API will return simulated data for development
-- Google OAuth requires proper credentials from Google Cloud Console
+- The mail module integrates directly with Gmail API using the user's OAuth credentials.
+- Google OAuth requires proper credentials from Google Cloud Console with Gmail API scopes enabled.
 

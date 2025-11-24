@@ -1,10 +1,10 @@
 # Roadmap
 
 ## Q4 2025
-- **Sprint 1 (current)**: Authentication foundation (magic link, Google OAuth) + baseline Mongo models.
-- **Sprint 2**: Inbox listing & thread detail with full functionality.
-- **Sprint 3**: Compose & send, feature flags, admin settings.
-- **Sprint 4**: Observability hardening, AI summary integration, pilot-ready release.
+- **Sprint 1 (current)**: Authentication foundation (Google OAuth) + Gmail Integration (Read/Write/Send) + baseline Mongo models.
+- **Sprint 2**: UI Polish, AI summary integration, feature flags.
+- **Sprint 3**: Admin settings, observability hardening.
+- **Sprint 4**: Pilot-ready release.
 
 ## Q1 2026
 - Expand connectors (Outlook, generic IMAP).

@@ -8,21 +8,21 @@
   - Automatic token refresh on 401 responses with concurrency handling
   - Protected routes with redirect to /login
   - Logout functionality clearing all tokens
-- **Email Dashboard Mockup (3-Column Layout)**
+- **Email Dashboard (Gmail Integration)**
   - Responsive three-column layout: Folders (left ~20%), Thread List (center ~40%), Thread Detail (right ~40%)
-  - Mock API endpoints following Zero's architecture:
-    - GET /mail/mailboxes — List mailboxes/folders
-    - GET /mail/mailboxes/:id/emails — List thread IDs (lightweight: `{ id, historyId }`)
-    - GET /mail/emails/:id — Get full thread detail with all messages
-    - POST /mail/emails/search — Search threads by query
-  - Mock API implementation: FastAPI backend with static mock data following Zero's data structures (`ParsedMessage`, `IGetThreadResponse`)
+  - Real Gmail API endpoints:
+    - GET /mail/mailboxes — List mailboxes/folders from Gmail
+    - GET /mail/mailboxes/:id/emails — List threads from Gmail
+    - GET /mail/emails/:id — Get full thread detail from Gmail
+    - POST /mail/emails/send — Send email via Gmail
+    - POST /mail/emails/:id/reply — Reply to email via Gmail
+    - POST /mail/emails/:id/modify — Modify email labels (read/unread, star)
   - Thread-based structure: Groups related emails into conversations
   - Efficient loading pattern:
     - Virtual scrolling: Render only visible threads (~10-15 on screen)
     - React Query caching: 1-hour staleTime, no redundant API calls
     - Lazy loading: Fetch thread details on-demand when thread is rendered
-  - Mock API returns realistic sample data: sender name/email, subject, body preview, timestamps, thread labels, attachments
-  - Folder navigation, thread selection, detail view with all messages, action buttons (Reply, Forward, Delete, Star, etc.) — UI mockup only
+  - Folder navigation, thread selection, detail view with all messages, action buttons (Reply, Forward, Delete, Star, etc.)
   - Keyboard accessibility (Arrow keys, Enter, Tab) and responsive mobile fallback (single-column with back button)
 - **API Client & Token Management**
   - API client with automatic token attachment (Authorization: Bearer)
@@ -44,7 +44,6 @@
     - Screenshots or GIF walkthrough demonstrating: login (email), login (Google), token refresh (simulate expiry), logout, and 3-column dashboard
 
 ## Out of scope (defer to post-MVP)
-- Real email provider integration (Gmail, IMAP) — using mock data only
 - Full-text search and advanced filters (requires Elastic/OpenSearch)
 - Offline caching in frontend
 - Multi-language localization
@@ -55,8 +54,7 @@
 - Admin settings and feature flags (future)
 
 ## Assumptions
-- All email data comes from mock API (static JSON files, mock API library like MSW/json-server, or local mock server)
-- Authentication endpoints can be real FastAPI backend or mocked (for assignment purposes)
+- Authentication endpoints are real FastAPI backend
 - Google OAuth credentials provisioned for development (Google Cloud Console OAuth client ID)
 - Token storage: access token in-memory (React state/context), refresh token in localStorage (with security justification in README)
 - API client handles automatic token attachment and refresh with concurrency protection (single refresh call for multiple simultaneous 401s)
@@ -64,7 +62,7 @@
 ## Success criteria
 - Complete authentication flow (email/password + Google) working end-to-end
 - Token refresh mechanism handles expiry and concurrent requests correctly
-- Three-column email dashboard displays mock data correctly
+- Three-column email dashboard displays real Gmail data
 - Protected routes redirect unauthenticated users
 - App deployed to public hosting with accessible URL
 - README includes setup instructions, deployment URL, and token storage justification
