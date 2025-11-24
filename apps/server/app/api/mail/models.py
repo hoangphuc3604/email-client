@@ -1,41 +1,50 @@
 """Pydantic models for mail API following Zero's structure."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime
+from pydantic.alias_generators import to_camel
 
 
-class Sender(BaseModel):
+class CamelModel(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        from_attributes=True
+    )
+
+
+class Sender(CamelModel):
     """Email sender/recipient model."""
     name: Optional[str] = None
     email: str
 
 
-class Label(BaseModel):
+class Label(CamelModel):
     """Email label/tag model."""
     id: str
     name: str
     type: Optional[str] = None  # system or user
 
 
-class Attachment(BaseModel):
+class Attachment(CamelModel):
     """Email attachment model."""
-    attachmentId: str
+    attachment_id: str
     filename: str
-    mimeType: str
+    mime_type: str
     size: int
     body: str
     headers: List[dict] = []
 
 
-class ParsedMessage(BaseModel):
+class ParsedMessage(CamelModel):
     """
     Full email message following Zero's ParsedMessage structure.
     Used in thread detail view.
     """
     id: str
-    threadId: str
-    connectionId: Optional[str] = None
+    thread_id: str
+    connection_id: Optional[str] = None
     title: str
     subject: str
     sender: Sender
@@ -43,63 +52,63 @@ class ParsedMessage(BaseModel):
     cc: Optional[List[Sender]] = None
     bcc: Optional[List[Sender]] = None
     tls: bool = True
-    listUnsubscribe: Optional[str] = None
-    listUnsubscribePost: Optional[str] = None
-    receivedOn: str  # ISO timestamp
+    list_unsubscribe: Optional[str] = None
+    list_unsubscribe_post: Optional[str] = None
+    received_on: str  # ISO timestamp
     unread: bool = False
     body: str
-    processedHtml: str
-    blobUrl: str = ""
-    decodedBody: Optional[str] = None
+    processed_html: str
+    blob_url: str = ""
+    decoded_body: Optional[str] = None
     tags: List[Label] = []
     attachments: Optional[List[Attachment]] = None
-    isDraft: Optional[bool] = False
-    messageId: Optional[str] = None
+    is_draft: Optional[bool] = False
+    message_id: Optional[str] = None
     references: Optional[str] = None
-    inReplyTo: Optional[str] = None
-    replyTo: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    in_reply_to: Optional[str] = None
+    reply_to: Optional[str] = None
 
 
-class ThreadListItem(BaseModel):
+class ThreadPreview(CamelModel):
     """
-    Lightweight thread item for list views.
-    Following Zero's listThreads response.
+    Thread preview for search results.
+    Similar to what Zero shows in email list.
     """
     id: str
-    historyId: Optional[str] = None
+    history_id: Optional[str] = None
+    subject: str
+    sender: Sender
+    to: List[Sender] = []
+    received_on: str
+    unread: bool
+    tags: List[Label]
+    body: str  # Preview text
 
 
-class ThreadListResponse(BaseModel):
+class ThreadListResponse(CamelModel):
     """
     Response for GET /mailboxes/:id/emails
     Following Zero's IGetThreadsResponse.
     """
-    threads: List[ThreadListItem]
-    nextPageToken: Optional[str] = None
-    total: int
-    page: int
-    limit: int
-    has_next: bool
-    has_prev: bool
+    threads: List[ThreadPreview]
+    next_page_token: Optional[str] = None
+    result_size_estimate: int = 0
 
 
-class ThreadDetailResponse(BaseModel):
+class ThreadDetailResponse(CamelModel):
     """
     Response for GET /emails/:id
     Following Zero's IGetThreadResponse structure.
     """
     messages: List[ParsedMessage]
     latest: ParsedMessage
-    hasUnread: bool
-    totalReplies: int
+    has_unread: bool
+    total_replies: int
     labels: List[Label]
-    isLatestDraft: Optional[bool] = False
+    is_latest_draft: Optional[bool] = False
 
 
-class Mailbox(BaseModel):
+class Mailbox(CamelModel):
     """Mailbox/folder model."""
     id: str
     name: str
@@ -109,30 +118,31 @@ class Mailbox(BaseModel):
     custom: Optional[bool] = False
 
 
-class EmailUpdateRequest(BaseModel):
+class EmailUpdateRequest(CamelModel):
     """Request model for updating email properties."""
     unread: Optional[bool] = None
     starred: Optional[bool] = None
     labels: Optional[List[str]] = None
+    trash: Optional[bool] = None
 
 
-class EmailSearchRequest(BaseModel):
+class EmailSearchRequest(CamelModel):
     """Request model for searching emails."""
     query: str = Field(..., min_length=1, description="Search query")
     mailbox_id: Optional[str] = Field(None, description="Filter by mailbox")
 
 
-class ThreadPreview(BaseModel):
-    """
-    Thread preview for search results.
-    Similar to what Zero shows in email list.
-    """
-    id: str
-    historyId: Optional[str] = None
+class SendEmailRequest(CamelModel):
+    """Request model for sending an email."""
+    to: str
+    cc: Optional[str] = None
+    bcc: Optional[str] = None
     subject: str
-    sender: Sender
-    to: List[Sender]
-    receivedOn: str
-    unread: bool
-    tags: List[Label]
-    body: str  # Preview text
+    body: str
+
+
+class ReplyEmailRequest(CamelModel):
+    """Request model for replying to an email."""
+    to: str
+    subject: str
+    body: str
