@@ -95,6 +95,26 @@ export function useGoogleLogin() {
   })
 }
 
+export function useGoogleCodeLogin() {
+  const qc = useQueryClient()
+  const setUser = useAuthStore((s) => s.setUser)
+
+  return useMutation((code: string) => authApi.google({ code }), {
+    onSuccess(data) {
+      const user = data?.data?.user || data?.user || null
+      const accessToken = data?.data?.access_token || data?.access_token
+      if (accessToken) {
+        api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
+        try {
+          localStorage.setItem('access_token', accessToken)
+        } catch (e) {}
+      }
+      setUser(user)
+      qc.invalidateQueries(['me'])
+    },
+  })
+}
+
 export function useLogout() {
   const qc = useQueryClient()
   const clearUser = useAuthStore((s) => s.clearUser)

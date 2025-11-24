@@ -8,7 +8,10 @@ export default function GoogleCallback() {
       const search = window.location.search || ''
       const params = new URLSearchParams(hash.replace(/^#/, '') || search)
       const id_token = params.get('id_token')
-      if (id_token && window.opener) {
+      const code = params.get('code')
+      if (code && window.opener) {
+        try { window.opener.postMessage({ type: 'google-code', code }, window.location.origin) } catch (e) {}
+      } else if (id_token && window.opener) {
         // send token to opener window
         try { window.opener.postMessage({ type: 'google-id_token', id_token }, window.location.origin) } catch (e) {}
       }

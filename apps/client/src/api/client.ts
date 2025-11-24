@@ -3,9 +3,10 @@ import type { AxiosRequestConfig } from 'axios'
 import useAuthStore from '../store/authStore'
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || ''
+const API_PREFIX = API_BASE ? `${API_BASE.replace(/\/$/, '')}/api/v1` : '/api/v1'
 
 export const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: API_PREFIX,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -24,7 +25,7 @@ try {
 
 // A separate client used for refresh calls to avoid interceptor loops
 const refreshClient = axios.create({
-  baseURL: API_BASE,
+  baseURL: API_PREFIX,
   withCredentials: true,
 })
 

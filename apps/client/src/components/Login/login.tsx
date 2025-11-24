@@ -3,7 +3,7 @@
   import { useState } from 'react'
   import { useNavigate } from 'react-router-dom'
   import { useEffect } from 'react'
-  import { useLogin, useGoogleLogin } from '../../hooks/useAuth'
+  import { useLogin, useGoogleLogin, useGoogleCodeLogin } from '../../hooks/useAuth'
   import useAuthStore from '../../store/authStore'
 
   function Login() {
@@ -67,54 +67,38 @@
       }
     }
 
-    async function handleGoogleClick() {
-      const clientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID
-      if (!clientId) {
-        alert('Google Client ID not configured')
-        return
-      }
+    const googleCodeMutation = useGoogleCodeLogin()
 
+    async function handleGoogleClick() {
       try {
-        const ready = await waitForGIS(5000)
-        if (!ready) {
-          // Fall back to popup OAuth if GIS/One-Tap is blocked
-          // eslint-disable-next-line no-console
-          console.warn('GIS not ready within timeout, falling back to popup OAuth')
-          await openOAuthPopup(clientId)
+        // Ask backend for the Google authorization URL
+        const res = await (await import('../../api/auth')).getGoogleUrl()
+        const url = res?.data || res || null
+        if (!url) {
+          alert('Failed to get Google auth URL from server')
           return
         }
-        // @ts-ignore
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: (resp: any) => {
-            const cred = resp?.credential
-            if (cred) {
-              googleMutation.mutate(cred)
-            }
-          }
-        })
-        // @ts-ignore
-        window.google.accounts.id.prompt()
+
+        // Try GIS first; if not ready fall back to popup
+        const ready = await waitForGIS(2000)
+        if (ready && (window as any).google && (window as any).google.accounts && (window as any).google.accounts.id) {
+          // If GIS is available we still prefer the server-backed code flow via popup
+          // so open the URL returned by the backend in a popup.
+          await openOAuthPopup(url)
+          return
+        }
+
+        // GIS not ready or we prefer popup flow — open the server-provided URL
+        await openOAuthPopup(url)
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.error('Google sign-in failed, falling back to popup', e)
-        try {
-          await openOAuthPopup(clientId)
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error('Popup fallback also failed', err)
-          alert('Google sign-in failed')
-        }
+        console.error('Google sign-in failed, popup fallback', e)
+        alert('Google sign-in failed')
       }
     }
 
-    // Popup fallback: open Google's OAuth2 endpoint and wait for redirect to our app (hash contains id_token)
-    async function openOAuthPopup(clientId: string) {
-      const redirectUri = window.location.origin + '/google-callback'
-      const nonce = Math.random().toString(36).slice(2)
-      const scope = encodeURIComponent('openid email profile')
-      const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=id_token&scope=${scope}&nonce=${nonce}&prompt=select_account`
-
+    // Popup fallback: open the provided authorization URL and wait for redirect (code or id_token)
+    async function openOAuthPopup(url: string) {
       const width = 500
       const height = 600
       const left = window.screenX + (window.outerWidth - width) / 2
@@ -136,11 +120,21 @@
         function messageHandler(e: MessageEvent) {
           if (e.origin !== window.location.origin) return
           const data = e.data || {}
+          if (data && data.type === 'google-code' && data.code) {
+            try { if (popup && !popup.closed) popup.close() } catch (e) {}
+            cleanup()
+            // send auth code to backend
+            googleCodeMutation.mutate(data.code)
+            resolve()
+            return
+          }
           if (data && data.type === 'google-id_token' && data.id_token) {
             try { if (popup && !popup.closed) popup.close() } catch (e) {}
             cleanup()
+            // fallback: if we receive id_token, use existing id_token flow
             googleMutation.mutate(data.id_token)
             resolve()
+            return
           }
         }
 
