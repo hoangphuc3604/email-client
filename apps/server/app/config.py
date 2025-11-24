@@ -11,7 +11,11 @@ class Settings(BaseSettings):
     BASE_URL: str
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:5173"
+    ENCRYPTION_KEY: str = ""
     FRONTEND_URL: str = ""
 
     model_config = SettingsConfigDict(env_file=".env.local")
+
+settings = Settings()
 

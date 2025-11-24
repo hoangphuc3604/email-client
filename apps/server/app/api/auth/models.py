@@ -11,7 +11,7 @@ class LoginRequest(BaseModel):
   password: str
 
 class GoogleAuthRequest(BaseModel):
-  credential: str
+  code: str
 
 class RefreshTokenRequest(BaseModel):
   refresh_token: str
