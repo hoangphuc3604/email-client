@@ -1,35 +1,43 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional
+from pydantic.alias_generators import to_camel
 
-class RegisterRequest(BaseModel):
+class CamelModel(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        from_attributes=True
+    )
+
+class RegisterRequest(CamelModel):
     email: EmailStr
     password: str = Field(..., min_length=8, description="Password must be at least 8 characters")
     name: str = Field(..., min_length=1, description="User display name")
 
-class LoginRequest(BaseModel):
+class LoginRequest(CamelModel):
   email: EmailStr
   password: str
 
-class GoogleAuthRequest(BaseModel):
+class GoogleAuthRequest(CamelModel):
   code: str
 
-class RefreshTokenRequest(BaseModel):
+class RefreshTokenRequest(CamelModel):
   refresh_token: str
 
-class UserInfo(BaseModel):
+class UserInfo(CamelModel):
     id: str
     email: str
     name: str
 
-class AuthResponse(BaseModel):
+class AuthResponse(CamelModel):
     access_token: str
     refresh_token: str
     user: UserInfo
 
-class AuthResponseWithoutRefreshToken(BaseModel):
+class AuthResponseWithoutRefreshToken(CamelModel):
     access_token: str
     user: UserInfo
 
-class TokenResponse(BaseModel):
+class TokenResponse(CamelModel):
     access_token: str
     expires_in: Optional[int] = None
