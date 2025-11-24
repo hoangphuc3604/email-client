@@ -10,8 +10,15 @@ from app.api.auth.models import (
 from app.api.auth.dependencies import get_auth_service
 from app.models.api_response import APIResponse
 from app.utils.cookie import get_cookie_settings
+from app.utils.google_auth import get_google_auth_url
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+@router.get("/google/url", response_model=APIResponse[str])
+async def get_google_url():
+    """Get Google OAuth2 authorization URL"""
+    url = get_google_auth_url()
+    return APIResponse(data=url, message="Authorization URL generated successfully")
 
 @router.post("/register", response_model=APIResponse[AuthResponseWithoutRefreshToken], status_code=status.HTTP_201_CREATED)
 async def register(
@@ -81,7 +88,7 @@ async def google_login(
     auth_service: AuthService = Depends(get_auth_service)
 ):
     try:
-        result = await auth_service.google_login(google_request.credential)
+        result = await auth_service.google_login(google_request.code)
         
         cookie_settings = get_cookie_settings(request)
         response.set_cookie(

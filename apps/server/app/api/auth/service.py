@@ -2,7 +2,8 @@ from typing import Optional
 from pymongo.database import Database
 from app.utils.jwt import create_access_token, create_refresh_token, verify_token
 from app.utils.password import hash_password, verify_password
-from app.utils.google_auth import verify_google_token
+from app.utils.google_auth import exchange_code_for_credentials
+from app.utils.security import encrypt_token, hash_token
 from app.api.auth.models import AuthResponse, UserInfo
 from datetime import datetime, timedelta
 from bson import ObjectId
@@ -30,9 +31,10 @@ class AuthService:
         access_token = create_access_token(token_data)
         refresh_token = create_refresh_token(token_data)
         
+        # Store hashed refresh token
         await self.refresh_tokens_collection.insert_one({
             "user_id": user["_id"],
-            "token": refresh_token,
+            "token": hash_token(refresh_token),
             "created_at": datetime.utcnow(),
             "expires_at": datetime.utcnow() + timedelta(days=7),
             "revoked": False
@@ -103,33 +105,50 @@ class AuthService:
             )
         )
     
-    async def google_login(self, credential: str) -> AuthResponse:
-        """Google OAuth login"""
-        # Verify Google token
-        google_user = await verify_google_token(credential)
-        if not google_user:
-            raise ValueError("Invalid Google credential")
+    async def google_login(self, code: str) -> AuthResponse:
+        """Google OAuth login with Authorization Code Flow"""
+        # Exchange code for tokens
+        try:
+            google_data = exchange_code_for_credentials(code)
+        except Exception as e:
+            raise ValueError(f"Failed to exchange code for tokens: {str(e)}")
         
-        email = google_user["email"]
+        email = google_data["email"]
         
         # Find or create user
         user = await self.users_collection.find_one({"email": email})
+        
+        # Encrypt Google Refresh Token if available
+        encrypted_refresh_token = None
+        if google_data.get("refresh_token"):
+            encrypted_refresh_token = encrypt_token(google_data["refresh_token"])
+            
         if not user:
             # First-time user - create account
-            result = await self.users_collection.insert_one({
+            user_doc = {
                 "email": email,
-                "name": google_user["name"],
-                "google_id": google_user["google_id"],
+                "name": google_data["name"],
+                "picture": google_data.get("picture"),
                 "created_at": datetime.utcnow(),
-                "auth_provider": "google"
-            })
+                "auth_provider": "google",
+                "google_refresh_token": encrypted_refresh_token
+            }
+            result = await self.users_collection.insert_one(user_doc)
             user = await self.users_collection.find_one({"_id": result.inserted_id})
         else:
-            # Update Google ID if missing
-            if "google_id" not in user:
+            # Update Google Refresh Token if we got a new one
+            update_data = {}
+            if encrypted_refresh_token:
+                update_data["google_refresh_token"] = encrypted_refresh_token
+            
+            # Update picture if changed
+            if google_data.get("picture") and user.get("picture") != google_data["picture"]:
+                update_data["picture"] = google_data["picture"]
+                
+            if update_data:
                 await self.users_collection.update_one(
                     {"_id": user["_id"]},
-                    {"$set": {"google_id": google_user["google_id"]}}
+                    {"$set": update_data}
                 )
         
         tokens = await self._create_and_store_tokens(user)
@@ -149,7 +168,8 @@ class AuthService:
         if not payload:
             raise ValueError("Invalid or expired refresh token")
         
-        token_doc = await self.refresh_tokens_collection.find_one({"token": refresh_token})
+        hashed_token = hash_token(refresh_token)
+        token_doc = await self.refresh_tokens_collection.find_one({"token": hashed_token})
         if not token_doc:
             raise ValueError("Refresh token not found")
         
@@ -182,7 +202,7 @@ class AuthService:
         
         await self.refresh_tokens_collection.insert_one({
             "user_id": token_doc["user_id"],
-            "token": new_refresh_token,
+            "token": hash_token(new_refresh_token),
             "created_at": datetime.utcnow(),
             "expires_at": datetime.utcnow() + timedelta(days=7),
             "revoked": False,
@@ -216,7 +236,8 @@ class AuthService:
         )
     
     async def revoke_refresh_token(self, refresh_token: str):
+        hashed_token = hash_token(refresh_token)
         await self.refresh_tokens_collection.update_one(
-            {"token": refresh_token},
+            {"token": hashed_token},
             {"$set": {"revoked": True, "revoked_at": datetime.utcnow()}}
         )
