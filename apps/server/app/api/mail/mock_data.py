@@ -91,13 +91,13 @@ def _generate_timestamp(days_ago: int = 0, hours_ago: int = 0, minutes_ago: int 
 MOCK_THREADS: Dict[str, Dict[str, Any]] = {
     "thread_001": {
         "id": "thread_001",
-        "historyId": "12345",
+        "history_id": "12345",
         "labels": [{"id": "inbox", "name": "inbox"}, {"id": "work", "name": "work"}],
         "messages": [
             {
                 "id": "msg_001_1",
-                "threadId": "thread_001",
-                "connectionId": "conn_001",
+                "thread_id": "thread_001",
+                "connection_id": "conn_001",
                 "title": "Q4 Marketing Campaign Review - Action Required",
                 "subject": "Q4 Marketing Campaign Review - Action Required",
                 "sender": {
@@ -110,40 +110,40 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
                 "cc": None,
                 "bcc": None,
                 "tls": True,
-                "receivedOn": _generate_timestamp(hours_ago=2),
+                "received_on": _generate_timestamp(hours_ago=2),
                 "unread": True,
                 "body": "Hi team,\n\nI've attached the Q4 marketing campaign analysis...",
-                "processedHtml": """<div><p>Hi team,</p><p>I've attached the Q4 marketing campaign analysis. Please review the key metrics and provide your feedback by EOD Friday.</p><p><strong>Key Highlights:</strong></p><ul><li>ROI increased by 23% compared to Q3</li><li>Customer acquisition cost down by 15%</li><li>Email open rates improved to 32%</li></ul><p>Let me know if you have any questions.</p><p>Best regards,<br>Sarah</p></div>""",
-                "blobUrl": "",
-                "decodedBody": """<div><p>Hi team,</p><p>I've attached the Q4 marketing campaign analysis. Please review the key metrics and provide your feedback by EOD Friday.</p><p><strong>Key Highlights:</strong></p><ul><li>ROI increased by 23% compared to Q3</li><li>Customer acquisition cost down by 15%</li><li>Email open rates improved to 32%</li></ul><p>Let me know if you have any questions.</p><p>Best regards,<br>Sarah</p></div>""",
+                "processed_html": """<div><p>Hi team,</p><p>I've attached the Q4 marketing campaign analysis. Please review the key metrics and provide your feedback by EOD Friday.</p><p><strong>Key Highlights:</strong></p><ul><li>ROI increased by 23% compared to Q3</li><li>Customer acquisition cost down by 15%</li><li>Email open rates improved to 32%</li></ul><p>Let me know if you have any questions.</p><p>Best regards,<br>Sarah</p></div>""",
+                "blob_url": "",
+                "decoded_body": """<div><p>Hi team,</p><p>I've attached the Q4 marketing campaign analysis. Please review the key metrics and provide your feedback by EOD Friday.</p><p><strong>Key Highlights:</strong></p><ul><li>ROI increased by 23% compared to Q3</li><li>Customer acquisition cost down by 15%</li><li>Email open rates improved to 32%</li></ul><p>Let me know if you have any questions.</p><p>Best regards,<br>Sarah</p></div>""",
                 "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "work", "name": "work", "type": "user"}],
                 "attachments": [
                     {
-                        "attachmentId": "att_001",
+                        "attachment_id": "att_001",
                         "filename": "Q4_Campaign_Report.pdf",
-                        "mimeType": "application/pdf",
+                        "mime_type": "application/pdf",
                         "size": 2458124,
                         "body": "",
                         "headers": []
                     }
                 ],
-                "isDraft": False,
-                "messageId": "msg_001_1@example.com",
+                "is_draft": False,
+                "message_id": "msg_001_1@example.com",
                 "references": None,
-                "inReplyTo": None,
-                "replyTo": None
+                "in_reply_to": None,
+                "reply_to": None
             }
         ]
     },
     "thread_002": {
         "id": "thread_002",
-        "historyId": "12346",
+        "history_id": "12346",
         "labels": [{"id": "inbox", "name": "inbox"}],
         "messages": [
             {
                 "id": "msg_002_1",
-                "threadId": "thread_002",
-                "connectionId": "conn_001",
+                "thread_id": "thread_002",
+                "connection_id": "conn_001",
                 "title": "You have 5 new connection requests",
                 "subject": "You have 5 new connection requests",
                 "sender": {
@@ -154,31 +154,31 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
                 "cc": None,
                 "bcc": None,
                 "tls": True,
-                "receivedOn": _generate_timestamp(hours_ago=5),
+                "received_on": _generate_timestamp(hours_ago=5),
                 "unread": True,
                 "body": "You have 5 new connection requests waiting for you...",
-                "processedHtml": """<div style="font-family: Arial, sans-serif;"><h2>New Connection Requests</h2><p>You have 5 new connection requests waiting for you:</p><ul><li>John Smith - Software Engineer at Google</li><li>Emily Chen - Product Manager at Meta</li><li>Michael Brown - CTO at StartupXYZ</li><li>Lisa Wang - Senior Developer at Amazon</li><li>David Martinez - Tech Lead at Microsoft</li></ul><p><a href="https://linkedin.com/connections">View all requests</a></p></div>""",
-                "blobUrl": "",
-                "decodedBody": """<div style="font-family: Arial, sans-serif;"><h2>New Connection Requests</h2><p>You have 5 new connection requests waiting for you:</p><ul><li>John Smith - Software Engineer at Google</li><li>Emily Chen - Product Manager at Meta</li><li>Michael Brown - CTO at StartupXYZ</li><li>Lisa Wang - Senior Developer at Amazon</li><li>David Martinez - Tech Lead at Microsoft</li></ul><p><a href="https://linkedin.com/connections">View all requests</a></p></div>""",
+                "processed_html": """<div style="font-family: Arial, sans-serif;"><h2>New Connection Requests</h2><p>You have 5 new connection requests waiting for you:</p><ul><li>John Smith - Software Engineer at Google</li><li>Emily Chen - Product Manager at Meta</li><li>Michael Brown - CTO at StartupXYZ</li><li>Lisa Wang - Senior Developer at Amazon</li><li>David Martinez - Tech Lead at Microsoft</li></ul><p><a href="https://linkedin.com/connections">View all requests</a></p></div>""",
+                "blob_url": "",
+                "decoded_body": """<div style="font-family: Arial, sans-serif;"><h2>New Connection Requests</h2><p>You have 5 new connection requests waiting for you:</p><ul><li>John Smith - Software Engineer at Google</li><li>Emily Chen - Product Manager at Meta</li><li>Michael Brown - CTO at StartupXYZ</li><li>Lisa Wang - Senior Developer at Amazon</li><li>David Martinez - Tech Lead at Microsoft</li></ul><p><a href="https://linkedin.com/connections">View all requests</a></p></div>""",
                 "tags": [{"id": "inbox", "name": "inbox", "type": "system"}],
                 "attachments": None,
-                "isDraft": False,
-                "messageId": "msg_002_1@example.com",
+                "is_draft": False,
+                "message_id": "msg_002_1@example.com",
                 "references": None,
-                "inReplyTo": None,
-                "replyTo": None
+                "in_reply_to": None,
+                "reply_to": None
             }
         ]
     },
     "thread_003": {
         "id": "thread_003",
-        "historyId": "12347",
+        "history_id": "12347",
         "labels": [{"id": "inbox", "name": "inbox"}, {"id": "work", "name": "work"}],
         "messages": [
             {
                 "id": "msg_003_1",
-                "threadId": "thread_003",
-                "connectionId": "conn_001",
+                "thread_id": "thread_003",
+                "connection_id": "conn_001",
                 "title": "Website Redesign Mockups - Round 1",
                 "subject": "Website Redesign Mockups - Round 1",
                 "sender": {
@@ -189,24 +189,24 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
                 "cc": [{"name": "Design Team", "email": "design@example.com"}],
                 "bcc": None,
                 "tls": True,
-                "receivedOn": _generate_timestamp(days_ago=1, hours_ago=3),
+                "received_on": _generate_timestamp(days_ago=1, hours_ago=3),
                 "unread": False,
                 "body": "Hey Alex, could you review these initial mockups?",
-                "processedHtml": "<div><p>Hey Alex,</p><p>Could you review these initial mockups? Looking for feedback on the overall layout and color scheme.</p><p>Thanks!</p></div>",
-                "blobUrl": "",
-                "decodedBody": "<div><p>Hey Alex,</p><p>Could you review these initial mockups? Looking for feedback on the overall layout and color scheme.</p><p>Thanks!</p></div>",
+                "processed_html": "<div><p>Hey Alex,</p><p>Could you review these initial mockups? Looking for feedback on the overall layout and color scheme.</p><p>Thanks!</p></div>",
+                "blob_url": "",
+                "decoded_body": "<div><p>Hey Alex,</p><p>Could you review these initial mockups? Looking for feedback on the overall layout and color scheme.</p><p>Thanks!</p></div>",
                 "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "work", "name": "work", "type": "user"}],
                 "attachments": None,
-                "isDraft": False,
-                "messageId": "msg_003_1@example.com",
+                "is_draft": False,
+                "message_id": "msg_003_1@example.com",
                 "references": None,
-                "inReplyTo": None,
-                "replyTo": None
+                "in_reply_to": None,
+                "reply_to": None
             },
             {
                 "id": "msg_003_2",
-                "threadId": "thread_003",
-                "connectionId": "conn_001",
+                "thread_id": "thread_003",
+                "connection_id": "conn_001",
                 "title": "Re: Website Redesign Mockups - Round 2",
                 "subject": "Re: Website Redesign Mockups - Round 2",
                 "sender": {
@@ -217,31 +217,31 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
                 "cc": [{"name": "Design Team", "email": "design@example.com"}],
                 "bcc": None,
                 "tls": True,
-                "receivedOn": _generate_timestamp(hours_ago=8),
+                "received_on": _generate_timestamp(hours_ago=8),
                 "unread": False,
                 "body": "Thanks for the feedback! I've updated the homepage mockups...",
-                "processedHtml": """<div><p>Hi,</p><p>Thanks for the feedback! I've updated the homepage mockups based on your comments.</p><p>The new version includes:</p><ol><li>Larger hero section with updated CTA</li><li>Simplified navigation menu</li><li>New testimonial section</li><li>Mobile-responsive improvements</li></ol><p>Check out the Figma link and let me know what you think!</p><p>Alex</p></div>""",
-                "blobUrl": "",
-                "decodedBody": """<div><p>Hi,</p><p>Thanks for the feedback! I've updated the homepage mockups based on your comments.</p><p>The new version includes:</p><ol><li>Larger hero section with updated CTA</li><li>Simplified navigation menu</li><li>New testimonial section</li><li>Mobile-responsive improvements</li></ol><p>Check out the Figma link and let me know what you think!</p><p>Alex</p></div>""",
+                "processed_html": """<div><p>Hi,</p><p>Thanks for the feedback! I've updated the homepage mockups based on your comments.</p><p>The new version includes:</p><ol><li>Larger hero section with updated CTA</li><li>Simplified navigation menu</li><li>New testimonial section</li><li>Mobile-responsive improvements</li></ol><p>Check out the Figma link and let me know what you think!</p><p>Alex</p></div>""",
+                "blob_url": "",
+                "decoded_body": """<div><p>Hi,</p><p>Thanks for the feedback! I've updated the homepage mockups based on your comments.</p><p>The new version includes:</p><ol><li>Larger hero section with updated CTA</li><li>Simplified navigation menu</li><li>New testimonial section</li><li>Mobile-responsive improvements</li></ol><p>Check out the Figma link and let me know what you think!</p><p>Alex</p></div>""",
                 "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "starred", "name": "starred", "type": "system"}, {"id": "work", "name": "work", "type": "user"}],
                 "attachments": None,
-                "isDraft": False,
-                "messageId": "msg_003_2@example.com",
+                "is_draft": False,
+                "message_id": "msg_003_2@example.com",
                 "references": "<msg_003_1@example.com>",
-                "inReplyTo": "<msg_003_1@example.com>",
-                "replyTo": None
+                "in_reply_to": "<msg_003_1@example.com>",
+                "reply_to": None
             }
         ]
     },
     "thread_004": {
         "id": "thread_004",
-        "historyId": "12348",
+        "history_id": "12348",
         "labels": [{"id": "inbox", "name": "inbox"}],
         "messages": [
             {
                 "id": "msg_004_1",
-                "threadId": "thread_004",
-                "connectionId": "conn_001",
+                "thread_id": "thread_004",
+                "connection_id": "conn_001",
                 "title": "[GitHub] Pull Request #1234: Add user authentication",
                 "subject": "[GitHub] Pull Request #1234: Add user authentication",
                 "sender": {
@@ -252,31 +252,31 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
                 "cc": None,
                 "bcc": None,
                 "tls": True,
-                "receivedOn": _generate_timestamp(hours_ago=12),
+                "received_on": _generate_timestamp(hours_ago=12),
                 "unread": False,
                 "body": "A new pull request has been opened...",
-                "processedHtml": """<div><h3>Pull Request #1234</h3><p><strong>Add user authentication</strong></p><p>@johndoe has opened a pull request:</p><ul><li>Implements JWT-based authentication</li><li>Adds login/logout endpoints</li><li>Updates documentation</li></ul><p><a href="https://github.com/example/repo/pull/1234">View Pull Request</a></p></div>""",
-                "blobUrl": "",
-                "decodedBody": """<div><h3>Pull Request #1234</h3><p><strong>Add user authentication</strong></p><p>@johndoe has opened a pull request:</p><ul><li>Implements JWT-based authentication</li><li>Adds login/logout endpoints</li><li>Updates documentation</li></ul><p><a href="https://github.com/example/repo/pull/1234">View Pull Request</a></p></div>""",
+                "processed_html": """<div><h3>Pull Request #1234</h3><p><strong>Add user authentication</strong></p><p>@johndoe has opened a pull request:</p><ul><li>Implements JWT-based authentication</li><li>Adds login/logout endpoints</li><li>Updates documentation</li></ul><p><a href="https://github.com/example/repo/pull/1234">View Pull Request</a></p></div>""",
+                "blob_url": "",
+                "decoded_body": """<div><h3>Pull Request #1234</h3><p><strong>Add user authentication</strong></p><p>@johndoe has opened a pull request:</p><ul><li>Implements JWT-based authentication</li><li>Adds login/logout endpoints</li><li>Updates documentation</li></ul><p><a href="https://github.com/example/repo/pull/1234">View Pull Request</a></p></div>""",
                 "tags": [{"id": "inbox", "name": "inbox", "type": "system"}],
                 "attachments": None,
-                "isDraft": False,
-                "messageId": "msg_004_1@example.com",
+                "is_draft": False,
+                "message_id": "msg_004_1@example.com",
                 "references": None,
-                "inReplyTo": None,
-                "replyTo": None
+                "in_reply_to": None,
+                "reply_to": None
             }
         ]
     },
     "thread_005": {
         "id": "thread_005",
-        "historyId": "12349",
+        "history_id": "12349",
         "labels": [{"id": "inbox", "name": "inbox"}, {"id": "personal", "name": "personal"}],
         "messages": [
             {
                 "id": "msg_005_1",
-                "threadId": "thread_005",
-                "connectionId": "conn_001",
+                "thread_id": "thread_005",
+                "connection_id": "conn_001",
                 "title": "Family Reunion Planning",
                 "subject": "Family Reunion Planning",
                 "sender": {
@@ -290,19 +290,19 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
                 "cc": None,
                 "bcc": None,
                 "tls": True,
-                "receivedOn": _generate_timestamp(days_ago=1),
+                "received_on": _generate_timestamp(days_ago=1),
                 "unread": True,
                 "body": "Hi kids, let's plan the summer reunion...",
-                "processedHtml": """<div><p>Hi kids,</p><p>Let's plan the summer reunion! I was thinking the first weekend in July. What do you think?</p><p>Location ideas:</p><ul><li>Grandma's house</li><li>The lake cabin</li><li>City park with BBQ facilities</li></ul><p>Let me know your availability!</p><p>Love, Mom</p></div>""",
-                "blobUrl": "",
-                "decodedBody": """<div><p>Hi kids,</p><p>Let's plan the summer reunion! I was thinking the first weekend in July. What do you think?</p><p>Location ideas:</p><ul><li>Grandma's house</li><li>The lake cabin</li><li>City park with BBQ facilities</li></ul><p>Let me know your availability!</p><p>Love, Mom</p></div>""",
+                "processed_html": """<div><p>Hi kids,</p><p>Let's plan the summer reunion! I was thinking the first weekend in July. What do you think?</p><p>Location ideas:</p><ul><li>Grandma's house</li><li>The lake cabin</li><li>City park with BBQ facilities</li></ul><p>Let me know your availability!</p><p>Love, Mom</p></div>""",
+                "blob_url": "",
+                "decoded_body": """<div><p>Hi kids,</p><p>Let's plan the summer reunion! I was thinking the first weekend in July. What do you think?</p><p>Location ideas:</p><ul><li>Grandma's house</li><li>The lake cabin</li><li>City park with BBQ facilities</li></ul><p>Let me know your availability!</p><p>Love, Mom</p></div>""",
                 "tags": [{"id": "inbox", "name": "inbox", "type": "system"}, {"id": "personal", "name": "personal", "type": "user"}],
                 "attachments": None,
-                "isDraft": False,
-                "messageId": "msg_005_1@example.com",
+                "is_draft": False,
+                "message_id": "msg_005_1@example.com",
                 "references": None,
-                "inReplyTo": None,
-                "replyTo": None
+                "in_reply_to": None,
+                "reply_to": None
             }
         ]
     }
@@ -312,23 +312,23 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
 # This is what gets returned by GET /mailboxes/:id/emails
 MOCK_THREAD_LIST: Dict[str, List[Dict[str, Any]]] = {
     "inbox": [
-        {"id": "thread_001", "historyId": "12345"},
-        {"id": "thread_002", "historyId": "12346"},
-        {"id": "thread_003", "historyId": "12347"},
-        {"id": "thread_004", "historyId": "12348"},
-        {"id": "thread_005", "historyId": "12349"},
+        {"id": "thread_001", "history_id": "12345"},
+        {"id": "thread_002", "history_id": "12346"},
+        {"id": "thread_003", "history_id": "12347"},
+        {"id": "thread_004", "history_id": "12348"},
+        {"id": "thread_005", "history_id": "12349"},
     ],
     "starred": [
-        {"id": "thread_003", "historyId": "12347"},
+        {"id": "thread_003", "history_id": "12347"},
     ],
     "sent": [],
     "drafts": [],
     "work": [
-        {"id": "thread_001", "historyId": "12345"},
-        {"id": "thread_003", "historyId": "12347"},
+        {"id": "thread_001", "history_id": "12345"},
+        {"id": "thread_003", "history_id": "12347"},
     ],
     "personal": [
-        {"id": "thread_005", "historyId": "12349"},
+        {"id": "thread_005", "history_id": "12349"},
     ]
 }
 
@@ -370,7 +370,7 @@ def get_emails_by_mailbox(
         "limit": limit,
         "has_next": end_idx < total,
         "has_prev": page > 1,
-        "nextPageToken": str(page + 1) if end_idx < total else None
+        "next_page_token": str(page + 1) if end_idx < total else None
     }
 
 
@@ -399,10 +399,10 @@ def get_email_by_id(thread_id: str) -> Optional[Dict[str, Any]]:
     return {
         "messages": messages,
         "latest": latest,
-        "hasUnread": has_unread,
-        "totalReplies": total_replies,
+        "has_unread": has_unread,
+        "total_replies": total_replies,
         "labels": thread["labels"],
-        "isLatestDraft": latest.get("isDraft", False)
+        "is_latest_draft": latest.get("is_draft", False)
     }
 
 
@@ -477,11 +477,11 @@ def search_emails(query: str, mailbox_id: Optional[str] = None) -> List[Dict[str
                 latest = thread["messages"][-1]
                 results.append({
                     "id": thread_id,
-                    "historyId": thread["historyId"],
+                    "history_id": thread["history_id"],
                     "subject": latest["subject"],
                     "sender": latest["sender"],
                     "to": latest["to"],
-                    "receivedOn": latest["receivedOn"],
+                    "received_on": latest["received_on"],
                     "unread": latest["unread"],
                     "tags": latest["tags"],
                     "body": latest["body"][:150] + "..." if len(latest["body"]) > 150 else latest["body"],
