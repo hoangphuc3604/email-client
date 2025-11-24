@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import Preloader from "./components/Pre";
 import Navbar from "./components/Navbar";
+import AuthInitializer from './auth/AuthInitializer'
 import Home from "./components/Home/Home";
 import About from "./components/About/About";
 import Dashboard from "./components/Dashboard/Dashboard";
@@ -36,6 +37,7 @@ function App() {
 
   return (
     <Router>
+      <AuthInitializer />
       <Preloader load={load} />
       <div className="App" id={load ? "no-scroll" : "scroll"}>
         <Navbar />

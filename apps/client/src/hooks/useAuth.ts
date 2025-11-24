@@ -23,6 +23,23 @@ function parseJwt(token: string | null) {
   }
 }
 
+function extractAccessToken(resp: any): string | null {
+  if (!resp) return null
+  // common shapes to check (ordered by likelihood)
+  const candidates = [
+    resp.access_token,
+    resp?.data?.access_token,
+    resp?.data?.data?.access_token,
+    resp?.data?.accessToken,
+    resp?.accessToken,
+    resp?.token,
+  ]
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.length > 0) return c
+  }
+  return null
+}
+
 function isTokenExpired(token: string | null) {
   const payload = parseJwt(token)
   if (!payload || !payload.exp) return true
@@ -36,16 +53,11 @@ export function useRegister() {
 
   return useMutation((payload: any) => authApi.register(payload), {
     onSuccess(data) {
-      // data structure depends on backend APIResponse wrapper
       const user = data?.data?.user || data?.user || null
-      const accessToken = data?.data?.access_token || data?.access_token
+      const accessToken = extractAccessToken(data)
       if (accessToken) {
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try {
-          localStorage.setItem('access_token', accessToken)
-        } catch (e) {
-          // ignore storage errors
-        }
+        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -60,14 +72,10 @@ export function useLogin() {
   return useMutation((payload: any) => authApi.login(payload), {
     onSuccess(data) {
       const user = data?.data?.user || data?.user || null
-      const accessToken = data?.data?.access_token || data?.access_token
+      const accessToken = extractAccessToken(data)
       if (accessToken) {
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try {
-          localStorage.setItem('access_token', accessToken)
-        } catch (e) {
-          // ignore storage errors
-        }
+        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -82,12 +90,10 @@ export function useGoogleLogin() {
   return useMutation((credential: string) => authApi.google({ credential }), {
     onSuccess(data) {
       const user = data?.data?.user || data?.user || null
-      const accessToken = data?.data?.access_token || data?.access_token
+      const accessToken = extractAccessToken(data)
       if (accessToken) {
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try {
-          localStorage.setItem('access_token', accessToken)
-        } catch (e) {}
+        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -102,12 +108,10 @@ export function useGoogleCodeLogin() {
   return useMutation((code: string) => authApi.google({ code }), {
     onSuccess(data) {
       const user = data?.data?.user || data?.user || null
-      const accessToken = data?.data?.access_token || data?.access_token
+      const accessToken = extractAccessToken(data)
       if (accessToken) {
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try {
-          localStorage.setItem('access_token', accessToken)
-        } catch (e) {}
+        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -159,8 +163,8 @@ export async function initAuth(queryClient: any) {
 
     console.debug('initAuth: stored token present?', !!stored)
 
-    if (stored && !isTokenExpired(stored)) {
-      console.debug('initAuth: using stored token')
+    if (stored) {
+      // try using stored token first even if our local expiry check disagrees
       api.defaults.headers.common['Authorization'] = `Bearer ${stored}`
       try {
         const meRes = await authApi.me()
@@ -169,8 +173,7 @@ export async function initAuth(queryClient: any) {
         queryClient.invalidateQueries(['me'])
         return
       } catch (meErr) {
-        console.debug('initAuth: stored token failed me(), will try refresh', meErr)
-        // fall through to refresh attempt
+        // stored token didn't work (maybe expired or invalid) -- fall through to server refresh
       }
     }
 
@@ -178,7 +181,7 @@ export async function initAuth(queryClient: any) {
     try {
       console.debug('initAuth: attempting server refresh')
       const refreshRes = await authApi.refresh()
-      const accessToken = refreshRes?.data?.data?.access_token || refreshRes?.data?.access_token
+      const accessToken = /*refreshRes?.data?.data?.access_token || */refreshRes?.data?.access_token
       if (accessToken) {
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
         try {

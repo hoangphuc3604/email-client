@@ -1,13 +1,14 @@
   import "./login.css"; // Import file CSS cho template
   import { FcGoogle } from "react-icons/fc";
   import { useState } from 'react'
-  import { useNavigate } from 'react-router-dom'
+  import { useNavigate, useSearchParams } from 'react-router-dom'
   import { useEffect } from 'react'
   import { useLogin, useGoogleLogin, useGoogleCodeLogin } from '../../hooks/useAuth'
   import useAuthStore from '../../store/authStore'
 
   function Login() {
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
     const mutation = useLogin()
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -18,6 +19,15 @@
     }
 
     const googleMutation = useGoogleLogin()
+    const googleCodeMutation = useGoogleCodeLogin()
+
+    // Auto-login if code is present in URL (Google OAuth callback)
+    useEffect(() => {
+      const code = searchParams.get('code')
+      if (code) {
+        googleCodeMutation.mutate(code)
+      }
+    }, [searchParams])
 
     // load Google Identity Services script
     useEffect(() => {
@@ -67,8 +77,6 @@
       }
     }
 
-    const googleCodeMutation = useGoogleCodeLogin()
-
     async function handleGoogleClick() {
       try {
         // Ask backend for the Google authorization URL
@@ -79,17 +87,8 @@
           return
         }
 
-        // Try GIS first; if not ready fall back to popup
-        const ready = await waitForGIS(2000)
-        if (ready && (window as any).google && (window as any).google.accounts && (window as any).google.accounts.id) {
-          // If GIS is available we still prefer the server-backed code flow via popup
-          // so open the URL returned by the backend in a popup.
-          await openOAuthPopup(url)
-          return
-        }
-
-        // GIS not ready or we prefer popup flow — open the server-provided URL
-        await openOAuthPopup(url)
+        // Redirect to Google OAuth in the same window
+        window.location.href = url
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error('Google sign-in failed, popup fallback', e)
@@ -174,6 +173,13 @@
         navigate('/dashboard')
       }
     }, [googleMutation.isSuccess])
+
+    // navigate to dashboard on google code login success
+    useEffect(() => {
+      if (googleCodeMutation.isSuccess) {
+        navigate('/dashboard')
+      }
+    }, [googleCodeMutation.isSuccess])
 
     // if already authenticated, redirect to dashboard
     const user = useAuthStore(s => s.user)
