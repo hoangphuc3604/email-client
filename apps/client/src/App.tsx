@@ -1,13 +1,16 @@
 import { useState, useEffect } from "react";
 import Preloader from "./components/Pre";
 import Navbar from "./components/Navbar";
+import AuthInitializer from './auth/AuthInitializer'
 import Home from "./components/Home/Home";
 import About from "./components/About/About";
 import Dashboard from "./components/Dashboard/Dashboard";
+import ProtectedRoute from './components/Auth/ProtectedRoute'
 import Footer from "./components/Footer";
 import Resume from "./components/Resume/ResumeNew";
 
 import Login from "./components/Login/login";
+import GoogleCallback from "./components/Login/GoogleCallback";
 import Signup from "./components/Signup/Signup";
 import {
   BrowserRouter as Router,
@@ -34,16 +37,18 @@ function App() {
 
   return (
     <Router>
+      <AuthInitializer />
       <Preloader load={load} />
       <div className="App" id={load ? "no-scroll" : "scroll"}>
         <Navbar />
         <ScrollToTop />
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard/></ProtectedRoute>} />
           <Route path="/about" element={<About />} />
           <Route path="/resume" element={<Resume />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/google-callback" element={<GoogleCallback />} />
 
           <Route path="/signup" element={<Signup />} />
           <Route path="*" element={<Navigate to="/"/>} />

@@ -20,7 +20,8 @@ def get_cookie_settings(request: Request) -> dict:
     if is_production:
         cookie_path = "/api/v1/auth"
     else:
-        cookie_path = "/auth"
+        # use root path in development so cookies are sent for proxied requests
+        cookie_path = "/"
     
     return {
         "httponly": True,

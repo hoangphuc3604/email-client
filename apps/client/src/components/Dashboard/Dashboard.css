@@ -66,24 +66,106 @@
 .email-list-column {
   border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
-.column-actions {
-  padding: 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+.email-list-actions {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(27,26,46,0.95), rgba(27,26,46,0.9));
+  position: relative;
 }
-.email-list-group {
-  overflow-y: auto; /* Cho phép cuộn danh sách email */
+.email-list {
+  overflow-y: auto; /* scroll list */
+  overflow-x: hidden; /* prevent horizontal scroll */
   flex-grow: 1;
+  background: transparent;
 }
-.email-list-group .list-group-item {
-  background-color: transparent;
-  color: white;
+.email-list .meta-col {
+  min-width: 0; /* allow flex item to shrink below content size */
+  max-width: 100%; /* prevent overflow */
+}
+
+/* High-contrast list rows */
+.email-list .list-group-item {
+  background: #231e2b; /* deep dark row */
+  color: #ffffff; /* white text */
   border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
   cursor: pointer;
+  padding: 0.9rem 1rem;
+  text-align: left; /* force left alignment */
 }
-.email-list-group .list-group-item:hover {
-  background-color: rgba(255, 255, 255, 0.1);
+
+.email-list .list-group-item:hover {
+  background: #ffffff;
+  color: #111;
 }
+
+/* clearer small text - all white */
+.email-list .sender { 
+  color: #ffffff; 
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.email-list .subject { 
+  color: #ffffff; 
+  font-weight: 600; 
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.email-list .preview { 
+  color: #ffffff; 
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.email-list .time { 
+  color: #ffffff; 
+  font-size: 0.85rem;
+  flex-shrink: 0; /* prevent time from shrinking */
+}
+
+/* hover state - all black */
+.email-list .list-group-item:hover .sender,
+.email-list .list-group-item:hover .subject,
+.email-list .list-group-item:hover .preview,
+.email-list .list-group-item:hover .time {
+  color: #111 !important;
+}
+
+/* unread stands out */
+.email-list .list-group-item.unread {
+  background: #5b2fa5; /* vivid purple */
+  color: #fff;
+}
+
+/* focused/selected row: light background with dark text */
+.email-list .list-group-item.cursor,
+.email-list .list-group-item.selected,
+.email-list .list-group-item:active {
+  background: #ffffff !important;
+  color: #111 !important;
+}
+
+/* ensure children are dark on selected */
+.email-list .list-group-item.cursor .sender,
+.email-list .list-group-item.cursor .subject,
+.email-list .list-group-item.cursor .preview,
+.email-list .list-group-item.cursor .time,
+.email-list .list-group-item.selected .sender,
+.email-list .list-group-item.selected .subject,
+.email-list .list-group-item.selected .preview,
+.email-list .list-group-item.selected .time {
+  color: #000000 !important;
+}
+
+/* custom thin scrollbar (WebKit) */
+.email-list::-webkit-scrollbar { width: 10px }
+.email-list::-webkit-scrollbar-track { background: transparent }
+.email-list::-webkit-scrollbar-thumb { background: #c48cf0; border-radius: 6px }
 .email-item-sender {
   font-weight: bold;
 }
@@ -92,12 +174,12 @@
 }
 .email-item-preview {
   font-size: 0.9em;
-  color: #aaa;
+  color: #ffffff; /* Changed from #aaa to white */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.email-list-group .list-group-item.unread {
+.email-list .list-group-item.unread {
   background-color: rgba(199, 112, 240, 0.1); /* Hơi tím cho thư chưa đọc */
   font-weight: bold;
 }
@@ -129,15 +211,26 @@
   color: white;
   border: none;
   border-radius: 0;
-  /* Thêm 2 dòng này để Card.Body co giãn */
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* ensure internal scrolling only */
 }
 
-/* Thêm class 'card-body' vào đây */
+/* Ensure Card.Body inside detail card gets the scroll */
 .email-detail-card .card-body {
   flex-grow: 1; /* Cho phép co giãn */
   overflow-y: auto; /* Thêm thanh cuộn CHỈ ở đây */
+  padding-right: 1rem; /* avoid content touching edge */
+}
+
+/* Improve appearance of top controls inside the list panel */
+.email-list-actions {
+  flex-wrap: wrap;
+}
+
+.email-list-actions .btn {
+  padding: 0.375rem 0.75rem;
+  min-width: 40px;
 }
 
 .email-detail-actions {
@@ -147,7 +240,28 @@
   flex-shrink: 0; /* Ngăn header bị co lại */
 }
 
-.email-body {
-  font-size: 1rem;
-  line-height: 1.6;
+.email-body-container {
+  width: 100%;
+  min-height: 300px;
+  background-color: white;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.email-body-container iframe {
+  display: block;
+}
+
+/* Email detail text colors */
+.email-detail-card .card-title {
+  color: #000000;
+  font-weight: 600;
+}
+
+.email-detail-card .card-subtitle {
+  color: #000000 !important;
+}
+
+.email-detail-card .card-subtitle strong {
+  color: #000000;
 }

@@ -228,3 +228,14 @@ textarea:focus {
   margin-right: 10px; /* Khoảng cách giữa icon và chữ */
   font-size: 22px;
 }
+
+/* OAuth loading spinner animation */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.oauth-loading {
+  pointer-events: none;
+  user-select: none;
+}
