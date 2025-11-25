@@ -52,6 +52,9 @@ function NavBar() {
       localStorage.removeItem('access_token')
     } catch (e) {}
     try {
+      localStorage.removeItem('email_previews_map')
+    } catch (e) {}
+    try {
       delete (await import('../api/client')).api.defaults.headers.common['Authorization']
     } catch (e) {}
     try {

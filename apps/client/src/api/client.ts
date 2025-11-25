@@ -74,6 +74,9 @@ export async function refreshToken(): Promise<string> {
     try {
       localStorage.removeItem('access_token')
     } catch (e) {}
+    try {
+      localStorage.removeItem('email_previews_map')
+    } catch (e) {}
     processQueue(refreshError, null)
     isRefreshing = false
     // Force local logout state and redirect to login, but avoid redirect loops.

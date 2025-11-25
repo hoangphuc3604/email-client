@@ -74,29 +74,67 @@
 }
 .email-list {
   overflow-y: auto; /* scroll list */
+  overflow-x: hidden; /* prevent horizontal scroll */
   flex-grow: 1;
   background: transparent;
+}
+.email-list .meta-col {
+  min-width: 0; /* allow flex item to shrink below content size */
+  max-width: 100%; /* prevent overflow */
 }
 
 /* High-contrast list rows */
 .email-list .list-group-item {
   background: #231e2b; /* deep dark row */
-  color: #f7f6fb; /* very light text */
+  color: #ffffff; /* white text */
   border: none;
   border-bottom: 1px solid rgba(255,255,255,0.04);
   cursor: pointer;
   padding: 0.9rem 1rem;
+  text-align: left; /* force left alignment */
 }
 
 .email-list .list-group-item:hover {
-  background: rgba(255,255,255,0.04);
+  background: #ffffff;
+  color: #111;
 }
 
-/* clearer small text */
-.email-list .sender { color: #e8e5f0; font-weight: 600; }
-.email-list .subject { color: #ffffff; font-weight: 600; }
-.email-list .preview { color: #b8b0cc; }
-.email-list .time { color: #9d92b5; font-size: 0.85rem; }
+/* clearer small text - all white */
+.email-list .sender { 
+  color: #ffffff; 
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.email-list .subject { 
+  color: #ffffff; 
+  font-weight: 600; 
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.email-list .preview { 
+  color: #ffffff; 
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.email-list .time { 
+  color: #ffffff; 
+  font-size: 0.85rem;
+  flex-shrink: 0; /* prevent time from shrinking */
+}
+
+/* hover state - all black */
+.email-list .list-group-item:hover .sender,
+.email-list .list-group-item:hover .subject,
+.email-list .list-group-item:hover .preview,
+.email-list .list-group-item:hover .time {
+  color: #111 !important;
+}
 
 /* unread stands out */
 .email-list .list-group-item.unread {
@@ -121,7 +159,7 @@
 .email-list .list-group-item.selected .subject,
 .email-list .list-group-item.selected .preview,
 .email-list .list-group-item.selected .time {
-  color: #111 !important;
+  color: #000000 !important;
 }
 
 /* custom thin scrollbar (WebKit) */
@@ -136,7 +174,7 @@
 }
 .email-item-preview {
   font-size: 0.9em;
-  color: #aaa;
+  color: #ffffff; /* Changed from #aaa to white */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -216,14 +254,14 @@
 
 /* Email detail text colors */
 .email-detail-card .card-title {
-  color: #ffffff;
+  color: #000000;
   font-weight: 600;
 }
 
 .email-detail-card .card-subtitle {
-  color: #d0c9e0 !important;
+  color: #000000 !important;
 }
 
 .email-detail-card .card-subtitle strong {
-  color: #e8e5f0;
+  color: #000000;
 }

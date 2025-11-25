@@ -13,9 +13,22 @@
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [isProcessingOAuth, setIsProcessingOAuth] = useState(false)
+    const [validationError, setValidationError] = useState('')
 
     const handleSubmit = (e: any) => {
       e.preventDefault()
+      setValidationError('')
+      
+      // Client-side validation
+      if (!email || !email.includes('@')) {
+        setValidationError('Please enter a valid email address')
+        return
+      }
+      if (!password || password.length === 0) {
+        setValidationError('Password is required')
+        return
+      }
+      
       mutation.mutate({ email, password })
     }
 
@@ -231,15 +244,60 @@
           </div>
           <div className="login_box">
             <h2>Login</h2>
+            
+            {/* Error messages */}
+            {validationError && (
+              <div style={{ 
+                padding: '10px', 
+                marginBottom: '15px', 
+                backgroundColor: 'rgba(255, 77, 79, 0.15)', 
+                border: '1px solid rgba(255, 77, 79, 0.3)',
+                borderRadius: '5px',
+                color: '#ff4d4f',
+                fontSize: '14px'
+              }}>
+                {validationError}
+              </div>
+            )}
+            
+            {mutation.isError && (
+              <div style={{ 
+                padding: '10px', 
+                marginBottom: '15px', 
+                backgroundColor: 'rgba(255, 77, 79, 0.15)', 
+                border: '1px solid rgba(255, 77, 79, 0.3)',
+                borderRadius: '5px',
+                color: '#ff4d4f',
+                fontSize: '14px'
+              }}>
+                {(mutation.error as any)?.response?.data?.detail || (mutation.error as any)?.message || 'Invalid email or password'}
+              </div>
+            )}
+            
             <form onSubmit={handleSubmit}>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} type="text" placeholder="Email" />
-              <input className="mt_20" value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Password" />
-              <button className="mt_20" type="submit">{mutation.isLoading ? 'Signing in...' : 'Sign in'}</button>
+              <input 
+                value={email} 
+                onChange={(e) => { setEmail(e.target.value); setValidationError('') }} 
+                type="text" 
+                placeholder="Email"
+                disabled={mutation.isLoading}
+              />
+              <input 
+                className="mt_20" 
+                value={password} 
+                onChange={(e) => { setPassword(e.target.value); setValidationError('') }} 
+                type="password" 
+                placeholder="Password"
+                disabled={mutation.isLoading}
+              />
+              <button className="mt_20" type="submit" disabled={mutation.isLoading}>
+                {mutation.isLoading ? 'Signing in...' : 'Sign in'}
+              </button>
             </form>
 
             <div className="divider mt_20">or</div>
 
-            <button type="button" className="btn-google mt_20" onClick={handleGoogleClick}>
+            <button type="button" className="btn-google mt_20" onClick={handleGoogleClick} disabled={mutation.isLoading}>
               <FcGoogle />
               Login with Google
             </button>

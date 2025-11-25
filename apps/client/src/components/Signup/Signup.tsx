@@ -64,22 +64,36 @@ function Signup() {
         </div>
         <div className="signup_box">
           <h2>Sign Up</h2>
-          <form onSubmit={handleSubmit}>
-            <input value={name} onChange={(e) => setName(e.target.value)} type="text" placeholder="User Name" />
-            <input className="mt_20" value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="Email" />
-            <input className="mt_20" value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Create Password" />
-            <button className="mt_20" type="submit">{mutation.isLoading ? 'Signing up...' : 'Sign Up'}</button>
-          </form>
-          {/* Local or server-side error display */}
-          {localError && <div className="error" style={{ color: 'red', marginTop: 8 }}>{localError}</div>}
+          
+          {/* Error messages with consistent styling */}
+          {localError && (
+            <div style={{ 
+              padding: '10px', 
+              marginBottom: '15px', 
+              backgroundColor: 'rgba(255, 77, 79, 0.15)', 
+              border: '1px solid rgba(255, 77, 79, 0.3)',
+              borderRadius: '5px',
+              color: '#ff4d4f',
+              fontSize: '14px'
+            }}>
+              {localError}
+            </div>
+          )}
+          
           {mutation.isError && (
-            <div className="error" style={{ color: 'red', marginTop: 8 }}>
+            <div style={{ 
+              padding: '10px', 
+              marginBottom: '15px', 
+              backgroundColor: 'rgba(255, 77, 79, 0.15)', 
+              border: '1px solid rgba(255, 77, 79, 0.3)',
+              borderRadius: '5px',
+              color: '#ff4d4f',
+              fontSize: '14px'
+            }}>
               {(() => {
-                // Try to display backend validation details if present
                 const err: any = mutation.error
                 if (err?.response?.data) {
                   try {
-                    // common shapes: { detail: '...' } or APIResponse wrapper { detail: ..., message: ..., errors: ... }
                     const data = err.response.data
                     if (data.detail) return String(data.detail)
                     if (data.message) return String(data.message)
@@ -92,6 +106,35 @@ function Signup() {
               })()}
             </div>
           )}
+          
+          <form onSubmit={handleSubmit}>
+            <input 
+              value={name} 
+              onChange={(e) => { setName(e.target.value); setLocalError(null) }} 
+              type="text" 
+              placeholder="User Name"
+              disabled={mutation.isLoading}
+            />
+            <input 
+              className="mt_20" 
+              value={email} 
+              onChange={(e) => { setEmail(e.target.value); setLocalError(null) }} 
+              type="email" 
+              placeholder="Email"
+              disabled={mutation.isLoading}
+            />
+            <input 
+              className="mt_20" 
+              value={password} 
+              onChange={(e) => { setPassword(e.target.value); setLocalError(null) }} 
+              type="password" 
+              placeholder="Create Password"
+              disabled={mutation.isLoading}
+            />
+            <button className="mt_20" type="submit" disabled={mutation.isLoading}>
+              {mutation.isLoading ? 'Signing up...' : 'Sign Up'}
+            </button>
+          </form>
 
           <div className="divider mt_20">or</div>
 
