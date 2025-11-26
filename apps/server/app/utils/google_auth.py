@@ -5,10 +5,10 @@ from app.config import settings
 
 # Scopes required for the application
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.send",
-    "openid",
+    # "https://www.googleapis.com/auth/gmail.readonly",
+    # "https://www.googleapis.com/auth/gmail.modify",
+    # "https://www.googleapis.com/auth/gmail.send",
+    # "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
