@@ -55,6 +55,7 @@ origins = [
     "http://localhost:5174",
     "https://localhost:3000",
     "https://localhost:3001",
+    "https://email-client-7xd9.onrender.com",
 ]
 
 if settings.FRONTEND_URL:
