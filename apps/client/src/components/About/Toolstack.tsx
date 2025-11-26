@@ -3,7 +3,7 @@ import { Col, Row } from "react-bootstrap";
 import macOs from "../../Assets/TechIcons/Apple MacOSX.svg";
 import chrome from "../../Assets/TechIcons/Google Chrome.svg";
 import vsCode from "../../Assets/TechIcons/vscode.svg";
-import intelliJ from "../../Assets/TechIcons/intellij-idea.svg";
+
 
 function Toolstack() {
   return (
@@ -21,10 +21,7 @@ function Toolstack() {
         <div className="tech-icons-text">Vs Code</div>
       </Col>
 
-      <Col xs={4} md={2} className="tech-icons ">
-        <img src={intelliJ} alt="go" className="tech-icon-images" />
-        <div className="tech-icons-text">IntelliJ</div>
-      </Col>
+
     </Row>
   );
 }
