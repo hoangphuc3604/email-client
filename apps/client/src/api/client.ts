@@ -51,9 +51,9 @@ const processQueue = (error: any, token: string | null = null) => {
 // Centralized refresh function to avoid duplicate refresh requests
 export async function refreshToken(): Promise<string> {
   if (isRefreshing) {
-    return new Promise((resolve, reject) => {
-      failedQueue.push({ resolve, reject, config: {} as AxiosRequestConfig })
-    }) as Promise<string>
+    return new Promise<string>((resolve, reject) => {
+      failedQueue.push({ resolve: resolve as any, reject, config: {} as AxiosRequestConfig })
+    })
   }
 
   isRefreshing = true

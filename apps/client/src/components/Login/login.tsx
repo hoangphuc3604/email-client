@@ -79,7 +79,7 @@
       console.log('google ready?', !!(window as any).google && !!(window as any).google.accounts && !!(window as any).google.accounts.id)
     }, [])
 
-    async function waitForGIS(timeout = 5000) {
+    async function _waitForGIS(timeout = 5000) {
       const start = Date.now()
       // simple poll loop
       // eslint-disable-next-line no-constant-condition
@@ -112,7 +112,7 @@
     }
 
     // Popup fallback: open the provided authorization URL and wait for redirect (code or id_token)
-    async function openOAuthPopup(url: string) {
+    async function _openOAuthPopup(url: string) {
       const width = 500
       const height = 600
       const left = window.screenX + (window.outerWidth - width) / 2

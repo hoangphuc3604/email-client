@@ -18,7 +18,6 @@ import {
   FaStar,
   FaRegStar,
   FaPaperPlane,
-  FaEdit,
   FaTrash,
   FaSync,
   FaReply,
@@ -127,7 +126,6 @@ export default function Dashboard() {
   async function loadAllFoldersInitial() {
     // Check if we have cached data - but always reload on mount to check for attachments
     // since attachment info might not be in the cache
-    const hasCachedData = Object.keys(previewsMap).length > 0
     
     // For now, always do a fresh load to ensure attachments are properly checked
     // In the future, we could store attachment info in cache as well

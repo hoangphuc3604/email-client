@@ -22,7 +22,6 @@ import ScrollToTop from "./components/ScrollToTop";
 import "./style.css";
 import "./App.css";
 import "bootstrap/dist/css/bootstrap.min.css";
-import { GrDashboard } from "react-icons/gr";
 
 function App() {
   const [load, updateLoad] = useState(true);

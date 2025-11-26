@@ -1,4 +1,3 @@
-import React from "react";
 import { Col, Row } from "react-bootstrap";
 import { SiNextdotjs } from "react-icons/si";
 

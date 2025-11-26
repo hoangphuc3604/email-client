@@ -3,26 +3,6 @@ import * as authApi from '../api/auth'
 import useAuthStore from '../store/authStore'
 import api from '../api/client'
 
-function parseJwt(token: string | null) {
-  if (!token) return null
-  try {
-    const parts = token.split('.')
-    if (parts.length < 2) return null
-    const b = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-    const json = decodeURIComponent(
-      atob(b)
-        .split('')
-        .map(function (c) {
-          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
-        })
-        .join('')
-    )
-    return JSON.parse(json)
-  } catch (e) {
-    return null
-  }
-}
-
 function extractAccessToken(resp: any): string | null {
   if (!resp) return null
   // common shapes to check (ordered by likelihood)
@@ -38,13 +18,6 @@ function extractAccessToken(resp: any): string | null {
     if (typeof c === 'string' && c.length > 0) return c
   }
   return null
-}
-
-function isTokenExpired(token: string | null) {
-  const payload = parseJwt(token)
-  if (!payload || !payload.exp) return true
-  const now = Math.floor(Date.now() / 1000)
-  return payload.exp <= now
 }
 
 export function useRegister() {
