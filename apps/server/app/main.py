@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pymongo import AsyncMongoClient
 from typing import Optional, List
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.router import router as api_router
 from app.config import Settings
@@ -45,6 +46,8 @@ app = FastAPI(
     version="0.1.0",
     root_path=root_path
 )
+
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 app.include_router(api_router, prefix=router_prefix)
 
