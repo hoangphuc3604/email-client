@@ -14,7 +14,7 @@ function Github() {
         Development <strong className="purple">Progress</strong>
       </h1>
       <GitHubCalendar
-        username="soumyajit4419" // <--- CHANGE THIS to your GitHub username
+        username="vow130504" // <--- CHANGE THIS to your GitHub username
         blockSize={30}
         blockMargin={10}
         fontSize={20}

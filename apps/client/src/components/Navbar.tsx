@@ -3,13 +3,10 @@ import Navbar from "react-bootstrap/Navbar";
 import Nav from "react-bootstrap/Nav";
 import Container from "react-bootstrap/Container";
 import logo from "../../public/logo-title.svg";
-import Button from "react-bootstrap/Button";
 import { Link } from "react-router-dom";
 import { useNavigate } from 'react-router-dom'
-import { CgGitFork } from "react-icons/cg";
 import { ImBlog } from "react-icons/im";
 import {
-  AiFillStar,
   AiOutlineHome,
   AiOutlineFundProjectionScreen,
   AiOutlineUser,
@@ -150,7 +147,7 @@ function NavBar() {
 {/* 
             <Nav.Item className="fork-btn">
               <Button
-                href="https://github.com/soumyajit4419/Portfolio"
+                href=""
                 target="_blank"
                 className="fork-btn-inner"
               >
