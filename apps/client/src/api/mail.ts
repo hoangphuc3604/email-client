@@ -29,9 +29,12 @@ const mailApi = {
     return res.data?.data || res.data || []
   },
 
-  async listEmails(mailboxId: string, limit: number = 50) {
+  async listEmails(mailboxId: string, limit: number = 50, pageToken?: string) {
     const res = await api.get(`/mail/mailboxes/${mailboxId}/emails`, {
-      params: { limit }
+      params: { 
+        limit,
+        ...(pageToken && { page_token: pageToken })
+      }
     })
     return res.data?.data || res.data || { threads: [], previews: [] }
   },

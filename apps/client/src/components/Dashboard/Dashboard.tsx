@@ -65,13 +65,23 @@ export default function Dashboard() {
       return {}
     }
   })
+  const [loadedFolders, setLoadedFolders] = useState<Set<string>>(new Set())
+  const [foldersNeedReload, setFoldersNeedReload] = useState<Set<string>>(new Set())
+  const [pageTokenMap, setPageTokenMap] = useState<Record<string, string | null>>({})
+  const [hasMoreMap, setHasMoreMap] = useState<Record<string, boolean>>({})
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
   const [showCompose, setShowCompose] = useState(false)
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
   const [cursorIndex, setCursorIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingEmail, setLoadingEmail] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const scrollTopRef = useRef<number>(0)
+  const isDraggingRef = useRef(false)
+  const startYRef = useRef(0)
+  const scrollStartRef = useRef(0)
+  const INITIAL_LOAD_COUNT = 20
 
   // Save previewsMap to localStorage whenever it changes
   useEffect(() => {
@@ -86,6 +96,19 @@ export default function Dashboard() {
     return previewsMap[selectedFolder] || []
   }, [previewsMap, selectedFolder])
 
+  // Restore scroll position after loading more emails
+  useEffect(() => {
+    if (loadingMore === false && scrollTopRef.current > 0 && listRef.current) {
+      // Use setTimeout to ensure DOM has fully updated
+      setTimeout(() => {
+        if (listRef.current && scrollTopRef.current > 0) {
+          listRef.current.scrollTop = scrollTopRef.current
+          scrollTopRef.current = 0
+        }
+      }, 0)
+    }
+  }, [loadingMore, displayList.length])
+
   const unreadInboxCount = useMemo(() => {
     const inboxPreviews = previewsMap['inbox'] || []
     return inboxPreviews.filter((e: any) => e.unread === true).length
@@ -97,7 +120,121 @@ export default function Dashboard() {
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
-    // Don't reload from backend - just switch to cached folder
+    
+    // If folder needs reload or hasn't been loaded yet, load it
+    if (!loadedFolders.has(id) || foldersNeedReload.has(id)) {
+      loadFolderData(id, true)
+    }
+  }
+
+  async function loadFolderData(folderId: string, isInitial: boolean = false) {
+    if (isInitial) {
+      setLoading(true)
+    } else {
+      setLoadingMore(true)
+      // Save scroll position BEFORE loading more
+      if (listRef.current) {
+        scrollTopRef.current = listRef.current.scrollTop
+      }
+    }
+    
+    try {
+      const pageToken = isInitial ? null : pageTokenMap[folderId]
+      const res = await mailApi.listEmails(folderId, INITIAL_LOAD_COUNT, pageToken || undefined)
+      const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+      const nextPageToken = res?.next_page_token || res?.nextPageToken
+      
+      setPreviewsMap((prev) => ({
+        ...prev,
+        [folderId]: isInitial ? previews : [...(prev[folderId] || []), ...previews]
+      }))
+      
+      // Store page token for next load
+      setPageTokenMap((prev) => ({
+        ...prev,
+        [folderId]: nextPageToken || null
+      }))
+      
+      // Track if there are more emails to load
+      setHasMoreMap((prev) => ({
+        ...prev,
+        [folderId]: !!nextPageToken
+      }))
+      
+      setLoadedFolders((prev) => new Set([...prev, folderId]))
+      setFoldersNeedReload((prev) => {
+        const updated = new Set(prev)
+        updated.delete(folderId)
+        return updated
+      })
+    } catch (e) {
+      console.error(`Error loading folder ${folderId}:`, e)
+    } finally {
+      if (isInitial) {
+        setLoading(false)
+      } else {
+        setLoadingMore(false)
+      }
+    }
+  }
+
+  function loadMoreEmails() {
+    const hasMore = hasMoreMap[selectedFolder]
+    if (hasMore && !loadingMore) {
+      loadFolderData(selectedFolder, false)
+    }
+  }
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget
+    const scrollPosition = target.scrollTop + target.clientHeight
+    const scrollHeight = target.scrollHeight
+    
+    // Load more when scrolled to 80% of the list
+    if (scrollPosition >= scrollHeight * 0.8 && !loadingMore && !loading) {
+      const hasMore = hasMoreMap[selectedFolder]
+      if (hasMore) {
+        loadMoreEmails()
+      }
+    }
+  }
+
+  // Mouse drag scrolling handlers
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!listRef.current) return
+    
+    isDraggingRef.current = true
+    startYRef.current = e.clientY
+    scrollStartRef.current = listRef.current.scrollTop
+    listRef.current.style.cursor = 'grabbing'
+    listRef.current.style.userSelect = 'none'
+  }
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || !listRef.current) return
+    
+    // If we've moved more than 5 pixels, it's a drag not a click
+    const deltaY = Math.abs(startYRef.current - e.clientY)
+    if (deltaY > 5) {
+      e.preventDefault()
+      e.stopPropagation()
+      const scrollDelta = startYRef.current - e.clientY
+      listRef.current.scrollTop = scrollStartRef.current + scrollDelta
+    }
+  }
+
+  const handleMouseUp = () => {
+    if (!listRef.current) return
+    isDraggingRef.current = false
+    listRef.current.style.cursor = 'default'
+    listRef.current.style.userSelect = 'auto'
+  }
+
+  const handleMouseLeave = () => {
+    if (!listRef.current) return
+    isDraggingRef.current = false
+    listRef.current.style.cursor = 'default'
+    listRef.current.style.userSelect = 'auto'
   }
 
   async function loadMailboxes() {
@@ -114,41 +251,14 @@ export default function Dashboard() {
         unreadCount: box.unread_count || 0
       }))
       setMailboxes(filtered.length > 0 ? filtered : [])
-      // Load ALL folders on initial load to populate previewsMap
-      await loadAllFoldersInitial(filtered.map((f: { id: any }) => f.id))
+      
+      // Only load Inbox on initial load for performance
+      const inboxId = 'inbox'
+      await loadFolderData(inboxId, true)
     } catch (e) {
       console.error('Error loading mailboxes:', e)
       setMailboxes([])
-    } finally {
       setLoading(false)
-    }
-  }
-
-  async function loadAllFoldersInitial(folderIds: string[]) {
-    // Load all Gmail folders into previewsMap
-    try {
-      const results = await Promise.all(
-        folderIds.map(async (folderId) => {
-          try {
-            const res = await mailApi.listEmails(folderId)
-            const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
-            return { folderId, previews }
-          } catch (e) {
-            return { folderId, previews: [] }
-          }
-        })
-      )
-      
-      const newPreviewsMap: Record<string, any[]> = {}
-      
-      // Process each folder
-      results.forEach(({ folderId, previews }) => {
-        newPreviewsMap[folderId] = previews
-      })
-      
-      setPreviewsMap(newPreviewsMap)
-    } catch (err) {
-      console.error('Error loading folders:', err)
     }
   }
 
@@ -474,42 +584,30 @@ export default function Dashboard() {
   }
   
   async function refreshFolder() {
-    // Hard refresh: clear cache and reload from backend
+    // Refresh only the current folder
     setSelectedEmail(null)
     setSelectedIds({})
     setMobileView('list')
-    setLoading(true)
-    try {
-      // Clear localStorage cache
-      localStorage.removeItem('email_previews_map')
-      
-      // Reload all folders (from the current mailboxes state)
-      const folderIds = mailboxes.map(m => m.id)
-      const results = await Promise.all(
-        folderIds.map(async (folderId) => {
-          try {
-            const res = await mailApi.listEmails(folderId)
-            const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
-            return { folderId, previews }
-          } catch (e) {
-            return { folderId, previews: [] }
-          }
-        })
-      )
-      
-      const newPreviewsMap: Record<string, any[]> = {}
-      
-      // Process each folder
-      results.forEach(({ folderId, previews }) => {
-        newPreviewsMap[folderId] = previews
+    
+    // Reset page token to start from beginning
+    setPageTokenMap((prev) => ({
+      ...prev,
+      [selectedFolder]: null
+    }))
+    
+    // Load fresh data
+    await loadFolderData(selectedFolder, true)
+    
+    // Mark all other folders as needing reload
+    setFoldersNeedReload(() => {
+      const updated = new Set<string>()
+      mailboxes.forEach((folder) => {
+        if (folder.id !== selectedFolder) {
+          updated.add(folder.id)
+        }
       })
-      
-      setPreviewsMap(newPreviewsMap)
-    } catch (err) {
-      console.error('Error refreshing folder:', err)
-    } finally {
-      setLoading(false)
-    }
+      return updated
+    })
   }
 
   const [composeTo, setComposeTo] = useState('')
@@ -806,48 +904,76 @@ export default function Dashboard() {
               </OverlayTrigger>
             </div>
 
-            <div className="email-list" ref={listRef}>
+            <div 
+              className="email-list" 
+              ref={listRef} 
+              onScroll={handleScroll}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
+            >
               {loading ? (
                 <div className="text-center p-5">
                   <FaSync className="fa-spin" size={32} />
                   <p className="mt-3">Loading emails...</p>
                 </div>
               ) : (
-              <ListGroup variant="flush">
-                {displayList.map((email: any, idx: number) => {
-                  const id = email.id
-                  const isRead = ('read' in email) ? !!email.read : (email.unread === false)
-                  const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
-                  const subject = email.subject || ''
-                  const preview = email.body || email.preview || ''
-                  const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
-                  const isStarred = ((email.labels || email.tags) || []).includes('starred')
-                  return (
-                    <ListGroup.Item
-                      id={`email-row-${id}`}
-                      key={id}
-                      action
-                      className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
-                      onClick={() => { setCursorIndex(idx); openEmail(email) }}
-                    >
-                      <div className="checkbox-col me-2" onClick={(e) => e.stopPropagation()}>
-                        <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
-                      </div>
-                      <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
-                        {isStarred ? <FaStar /> : <FaRegStar />}
-                      </div>
-                      <div className="meta-col flex-fill">
-                        <div className="row-top d-flex justify-content-between">
-                          <div className="sender">{sender}</div>
-                          <div className="time">{timeAgo(ts)}</div>
+              <>
+                <ListGroup variant="flush">
+                  {displayList.map((email: any, idx: number) => {
+                    const id = email.id
+                    const isRead = ('read' in email) ? !!email.read : (email.unread === false)
+                    const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
+                    const subject = email.subject || ''
+                    const preview = email.body || email.preview || ''
+                    const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
+                    const isStarred = ((email.labels || email.tags) || []).includes('starred')
+                    return (
+                      <ListGroup.Item
+                        id={`email-row-${id}`}
+                        key={id}
+                        action
+                        className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
+                        onClick={(e) => {
+                          // Don't open email if we were dragging to scroll
+                          if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
+                            return
+                          }
+                          setCursorIndex(idx)
+                          openEmail(email)
+                        }}
+                      >
+                        <div className="checkbox-col me-2" onClick={(e) => e.stopPropagation()}>
+                          <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
                         </div>
-                        <div className="subject">{subject}</div>
-                        <div className="preview">{preview}</div>
-                      </div>
-                    </ListGroup.Item>
-                  )
-                })}
-              </ListGroup>
+                        <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
+                          {isStarred ? <FaStar /> : <FaRegStar />}
+                        </div>
+                        <div className="meta-col flex-fill">
+                          <div className="row-top d-flex justify-content-between">
+                            <div className="sender">{sender}</div>
+                            <div className="time">{timeAgo(ts)}</div>
+                          </div>
+                          <div className="subject">{subject}</div>
+                          <div className="preview">{preview}</div>
+                        </div>
+                      </ListGroup.Item>
+                    )
+                  })}
+                </ListGroup>
+                {loadingMore && (
+                  <div className="text-center p-3">
+                    <FaSync className="fa-spin" size={20} />
+                    <small className="ms-2">Loading more...</small>
+                  </div>
+                )}
+                {!loadingMore && hasMoreMap[selectedFolder] && (
+                  <div className="text-center p-3">
+                    <small className="text-muted">Scroll down for more emails</small>
+                  </div>
+                )}
+              </>
               )}
             </div>
           </Col>
