@@ -30,6 +30,7 @@ class Label(CamelModel):
 class Attachment(CamelModel):
     """Email attachment model."""
     attachment_id: str
+    message_id: Optional[str] = None
     filename: str
     mime_type: str
     size: int

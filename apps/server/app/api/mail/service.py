@@ -7,11 +7,14 @@ from bson import ObjectId
 import email.utils
 from datetime import datetime
 import base64
+import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import mimetypes
+
+logger = logging.getLogger(__name__)
 from app.api.mail.models import (
     Mailbox,
     ThreadListResponse,
@@ -205,10 +208,11 @@ class MailService:
               if part.get('filename'):
                   attachments.append({
                       "attachment_id": body.get('attachmentId'),
+                      "message_id": msg_data['id'],
                       "filename": part.get('filename'),
                       "mime_type": mime_type,
                       "size": body.get('size', 0),
-                      "body": "", # Don't fetch content yet
+                      "body": "",
                       "headers": []
                   })
               
@@ -253,67 +257,155 @@ class MailService:
           "references": get_header('References')
       }
 
-  async def send_email(self, user_id: str, email_data: dict):
+  async def send_email(self, user_id: str, email_data: dict, attachments: list = None):
+      from googleapiclient.errors import HttpError
+      
+      if not email_data.get('to'):
+          raise ValueError("Recipient email address is required")
+      if not email_data.get('subject'):
+          raise ValueError("Email subject is required")
+      
       service = await self.get_gmail_service(user_id)
       
-      message = MIMEMultipart()
-      message['to'] = email_data.get('to')
-      message['subject'] = email_data.get('subject')
-      if email_data.get('cc'):
-          message['cc'] = email_data.get('cc')
-      if email_data.get('bcc'):
-          message['bcc'] = email_data.get('bcc')
+      try:
+          message = MIMEMultipart()
+          message['to'] = email_data.get('to')
+          message['subject'] = email_data.get('subject')
+          if email_data.get('cc'):
+              message['cc'] = email_data.get('cc')
+          if email_data.get('bcc'):
+              message['bcc'] = email_data.get('bcc')
+              
+          body = email_data.get('body', '')
+          # Simple detection, assume HTML if it looks like it, or just send as HTML
+          msg = MIMEText(body, 'html')
+          message.attach(msg)
           
-      body = email_data.get('body', '')
-      # Simple detection, assume HTML if it looks like it, or just send as HTML
-      msg = MIMEText(body, 'html')
-      message.attach(msg)
-      
-      # TODO: Handle attachments in send
-      
-      raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-      body = {'raw': raw}
-      
-      sent_message = service.users().messages().send(userId='me', body=body).execute()
-      return sent_message
+          # Handle attachments
+          if attachments:
+              for attachment in attachments:
+                  try:
+                      mime_type_parts = attachment['mime_type'].split('/', 1)
+                      if len(mime_type_parts) == 2:
+                          part = MIMEBase(mime_type_parts[0], mime_type_parts[1])
+                      else:
+                          part = MIMEBase('application', 'octet-stream')
+                      
+                      part.set_payload(attachment['content'])
+                      encoders.encode_base64(part)
+                      part.add_header(
+                          'Content-Disposition',
+                          f'attachment; filename="{attachment["filename"]}"'
+                      )
+                      message.attach(part)
+                  except Exception as e:
+                      raise ValueError(f"Failed to attach file '{attachment.get('filename', 'unknown')}': {str(e)}")
+          
+          raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+          body = {'raw': raw}
+          
+          sent_message = service.users().messages().send(userId='me', body=body).execute()
+          return sent_message
+      except HttpError as e:
+          if e.resp.status == 401:
+              raise ValueError("Authentication failed. Please refresh your Google credentials.")
+          elif e.resp.status == 403:
+              raise ValueError("Access denied. Insufficient permissions to send email.")
+          elif e.resp.status == 400:
+              raise ValueError(f"Invalid email format: {str(e)}")
+          else:
+              raise ValueError(f"Gmail API error: {str(e)}")
+      except ValueError:
+          raise
+      except Exception as e:
+          raise ValueError(f"Failed to send email: {str(e)}")
 
-  async def reply_email(self, user_id: str, email_id: str, reply_data: dict):
+  async def reply_email(self, user_id: str, email_id: str, reply_data: dict, attachments: list = None):
+      from googleapiclient.errors import HttpError
+      
+      if not email_id:
+          raise ValueError("Email ID is required")
+      if not reply_data.get('to'):
+          raise ValueError("Recipient email address is required")
+      if not reply_data.get('subject'):
+          raise ValueError("Email subject is required")
+      
       service = await self.get_gmail_service(user_id)
       
-      # Get original message to find threadId and headers
-      original_msg = service.users().messages().get(userId='me', id=email_id, format='metadata').execute()
-      thread_id = original_msg.get('threadId')
-      payload = original_msg.get('payload', {})
-      headers = payload.get('headers', [])
-      
-      def get_header(name):
-          return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
+      try:
+          # Get original message to find threadId and headers
+          original_msg = service.users().messages().get(userId='me', id=email_id, format='metadata').execute()
+          thread_id = original_msg.get('threadId')
           
-      message_id = get_header('Message-ID')
-      references = get_header('References')
-      if references:
-          references = references + " " + message_id
-      else:
-          references = message_id
+          if not thread_id:
+              raise ValueError(f"Could not find thread ID for message {email_id}")
           
-      message = MIMEMultipart()
-      message['to'] = reply_data.get('to')
-      message['subject'] = reply_data.get('subject') # Should probably prepend Re: if not present
-      message['In-Reply-To'] = message_id
-      message['References'] = references
-      
-      body = reply_data.get('body', '')
-      msg = MIMEText(body, 'html')
-      message.attach(msg)
-      
-      raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-      body = {
-          'raw': raw,
-          'threadId': thread_id
-      }
-      
-      sent_message = service.users().messages().send(userId='me', body=body).execute()
-      return sent_message
+          payload = original_msg.get('payload', {})
+          headers = payload.get('headers', [])
+          
+          def get_header(name):
+              return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
+              
+          message_id = get_header('Message-ID')
+          references = get_header('References')
+          if references:
+              references = references + " " + message_id
+          else:
+              references = message_id
+              
+          message = MIMEMultipart()
+          message['to'] = reply_data.get('to')
+          message['subject'] = reply_data.get('subject') # Should probably prepend Re: if not present
+          message['In-Reply-To'] = message_id
+          message['References'] = references
+          
+          body = reply_data.get('body', '')
+          msg = MIMEText(body, 'html')
+          message.attach(msg)
+          
+          # Handle attachments
+          if attachments:
+              for attachment in attachments:
+                  try:
+                      mime_type_parts = attachment['mime_type'].split('/', 1)
+                      if len(mime_type_parts) == 2:
+                          part = MIMEBase(mime_type_parts[0], mime_type_parts[1])
+                      else:
+                          part = MIMEBase('application', 'octet-stream')
+                      
+                      part.set_payload(attachment['content'])
+                      encoders.encode_base64(part)
+                      part.add_header(
+                          'Content-Disposition',
+                          f'attachment; filename="{attachment["filename"]}"'
+                      )
+                      message.attach(part)
+                  except Exception as e:
+                      raise ValueError(f"Failed to attach file '{attachment.get('filename', 'unknown')}': {str(e)}")
+          
+          raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+          body = {
+              'raw': raw,
+              'threadId': thread_id
+          }
+          
+          sent_message = service.users().messages().send(userId='me', body=body).execute()
+          return sent_message
+      except HttpError as e:
+          if e.resp.status == 404:
+              raise ValueError(f"Original message {email_id} not found")
+          elif e.resp.status == 401:
+              raise ValueError("Authentication failed. Please refresh your Google credentials.")
+          elif e.resp.status == 403:
+              raise ValueError("Access denied. Insufficient permissions to send email.")
+          elif e.resp.status == 400:
+              raise ValueError(f"Invalid email format: {str(e)}")
+          else:
+              raise ValueError(f"Gmail API error: {str(e)}")
+      except ValueError:
+          raise
+      except Exception as e:
+          raise ValueError(f"Failed to reply to email: {str(e)}")
 
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
       service = await self.get_gmail_service(user_id)
@@ -354,8 +446,159 @@ class MailService:
       # We need to return the updated email detail
       return await self.get_email_detail(user_id, email_id)
 
+  def _ensure_filename_extension(self, filename: str, mime_type: str) -> str:
+      """Ensure filename has proper extension based on mime type."""
+      if not filename or filename == 'attachment':
+          extension = mimetypes.guess_extension(mime_type)
+          if extension:
+              return f"attachment{extension}"
+          return filename
+      
+      if '.' in filename:
+          return filename
+      
+      extension = mimetypes.guess_extension(mime_type)
+      if extension:
+          return f"{filename}{extension}"
+      
+      return filename
+
   async def get_attachment(self, user_id: str, message_id: str, attachment_id: str):
+      """Get attachment data and metadata (filename, mime_type) from Gmail API."""
+      from googleapiclient.errors import HttpError
+      
+      if not message_id or not attachment_id:
+          raise ValueError("message_id and attachment_id are required")
+      
+      logger.info(f"[Attachment] Starting - message_id: {message_id}, attachment_id: {attachment_id[:50]}...")
+      
       service = await self.get_gmail_service(user_id)
-      attachment = service.users().messages().attachments().get(userId='me', messageId=message_id, id=attachment_id).execute()
-      data = base64.urlsafe_b64decode(attachment['data'])
-      return data
+      
+      filename = 'attachment'
+      mime_type = 'application/octet-stream'
+      found = False
+      
+      try:
+          message = service.users().messages().get(userId='me', id=message_id, format='full').execute()
+          payload = message.get('payload', {})
+          
+          logger.info(f"[Attachment] Message payload structure - has_parts: {'parts' in payload}, has_body: {'body' in payload}")
+          
+          fallback_attachment = None
+          
+          def find_attachment_in_parts(parts, depth=0):
+              nonlocal filename, mime_type, found, fallback_attachment
+              if not parts:
+                  return False
+              
+              logger.info(f"[Attachment] Searching in {len(parts)} parts at depth {depth}")
+              
+              for idx, part in enumerate(parts):
+                  part_attachment_id = part.get('body', {}).get('attachmentId')
+                  part_filename = part.get('filename', '')
+                  part_mime = part.get('mimeType', '')
+                  
+                  logger.info(f"[Attachment] Part {idx} - attachmentId: {part_attachment_id[:50] if part_attachment_id else 'None'}..., filename: {part_filename}, mimeType: {part_mime}")
+                  
+                  if part_attachment_id:
+                      logger.info(f"[Attachment] Comparing - looking for: {attachment_id[:100]}..., found: {part_attachment_id[:100]}..., match: {part_attachment_id == attachment_id}")
+                      
+                      if part_attachment_id == attachment_id:
+                          filename = part.get('filename', 'attachment') or 'attachment'
+                          mime_type = part.get('mimeType', 'application/octet-stream')
+                          found = True
+                          logger.info(f"[Attachment] MATCH FOUND in parts - filename: {filename}, mime_type: {mime_type}")
+                          return True
+                      
+                      if not fallback_attachment and part_filename:
+                          fallback_attachment = {
+                              'attachmentId': part_attachment_id,
+                              'filename': part_filename,
+                              'mimeType': part_mime
+                          }
+                          logger.info(f"[Attachment] Storing fallback attachment - filename: {part_filename}, mimeType: {part_mime}")
+                  
+                  if part.get('parts'):
+                      if find_attachment_in_parts(part.get('parts'), depth + 1):
+                          return True
+              return False
+          
+          if 'parts' in payload:
+              found = find_attachment_in_parts(payload['parts'])
+              if not found:
+                  logger.warning(f"[Attachment] Attachment not found in parts, checking payload body")
+                  if payload.get('body', {}).get('attachmentId') == attachment_id:
+                      filename = payload.get('filename', 'attachment') or 'attachment'
+                      mime_type = payload.get('mimeType', 'application/octet-stream')
+                      found = True
+                      logger.info(f"[Attachment] Found attachment in payload body - filename: {filename}, mime_type: {mime_type}")
+          elif payload.get('body', {}).get('attachmentId') == attachment_id:
+              filename = payload.get('filename', 'attachment') or 'attachment'
+              mime_type = payload.get('mimeType', 'application/octet-stream')
+              found = True
+              logger.info(f"[Attachment] Found attachment in payload body - filename: {filename}, mime_type: {mime_type}")
+          
+          if not found:
+              logger.warning(f"[Attachment] Attachment ID not found in message structure")
+              logger.warning(f"[Attachment] Looking for: {attachment_id[:100]}...")
+              
+              if fallback_attachment:
+                  logger.info(f"[Attachment] Using fallback attachment - filename: {fallback_attachment['filename']}, mimeType: {fallback_attachment['mimeType']}")
+                  filename = fallback_attachment['filename']
+                  mime_type = fallback_attachment['mimeType']
+                  found = True
+              else:
+                  logger.warning(f"[Attachment] No fallback attachment found, using defaults")
+          
+      except HttpError as e:
+          if e.resp.status == 404:
+              raise ValueError(f"Message {message_id} not found")
+          elif e.resp.status == 401:
+              raise ValueError("Authentication failed. Please refresh your Google credentials.")
+          elif e.resp.status == 403:
+              raise ValueError("Access denied. Insufficient permissions.")
+          else:
+              pass
+      except Exception as e:
+          pass
+      
+      logger.info(f"[Attachment] Before ensure_extension - filename: {filename}, mime_type: {mime_type}")
+      filename = self._ensure_filename_extension(filename, mime_type)
+      logger.info(f"[Attachment] After ensure_extension - filename: {filename}, mime_type: {mime_type}")
+      
+      try:
+          attachment_id_to_fetch = attachment_id
+          if not found and fallback_attachment:
+              attachment_id_to_fetch = fallback_attachment['attachmentId']
+              logger.info(f"[Attachment] Using fallback attachment ID to fetch data: {attachment_id_to_fetch[:50]}...")
+          
+          attachment = service.users().messages().attachments().get(
+              userId='me', 
+              messageId=message_id, 
+              id=attachment_id_to_fetch
+          ).execute()
+          
+          if 'data' not in attachment:
+              raise ValueError("Attachment data not found in response")
+              
+          data = base64.urlsafe_b64decode(attachment['data'])
+          logger.info(f"[Attachment] Fetched attachment data - size: {len(data)} bytes")
+      except HttpError as e:
+          if e.resp.status == 404:
+              raise ValueError(f"Attachment {attachment_id} not found in message {message_id}")
+          elif e.resp.status == 401:
+              raise ValueError("Authentication failed. Please refresh your Google credentials.")
+          elif e.resp.status == 403:
+              raise ValueError("Access denied. Insufficient permissions.")
+          else:
+              raise ValueError(f"Gmail API error: {str(e)}")
+      except Exception as e:
+          raise ValueError(f"Failed to fetch attachment: {str(e)}")
+      
+      result = {
+          "data": data,
+          "filename": filename,
+          "mime_type": mime_type
+      }
+      logger.info(f"[Attachment] Returning result - filename: {result['filename']}, mime_type: {result['mime_type']}, data_size: {len(result['data'])}")
+      return result

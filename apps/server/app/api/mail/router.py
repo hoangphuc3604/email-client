@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Form, UploadFile, File
+from typing import List, Optional
+from urllib.parse import quote
+import logging
 from app.api.auth.dependencies import get_current_user
 from app.api.auth.models import UserInfo
 from app.api.mail.service import MailService
 from app.api.mail.dependencies import get_mail_service
+
+logger = logging.getLogger(__name__)
 from app.api.mail.models import (
     Mailbox,
     ThreadListResponse,
@@ -61,30 +65,122 @@ async def get_email_detail(
 @router.post("/emails/{email_id}/reply", response_model=APIResponse[dict])
 async def reply_email(
     email_id: str,
-    request: ReplyEmailRequest,
+    to: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    attachments: Optional[List[UploadFile]] = File(None),
     mail_service: MailService = Depends(get_mail_service),
     current_user: UserInfo = Depends(get_current_user)
 ):
-    """Reply to an email."""
+    """Reply to an email with optional attachments."""
     try:
-        result = await mail_service.reply_email(current_user.id, email_id, request.model_dump())
+        # Prepare reply data
+        reply_data = {
+            "to": to,
+            "subject": subject,
+            "body": body
+        }
+        
+        # Process attachments if provided
+        attachment_list = []
+        if attachments:
+            MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB Gmail limit
+            for attachment in attachments:
+                # Read file content
+                content = await attachment.read()
+                
+                # Validate file size
+                if len(content) > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Attachment '{attachment.filename}' exceeds 25MB limit"
+                    )
+                
+                # Get MIME type
+                mime_type = attachment.content_type
+                if not mime_type:
+                    # Try to guess from filename
+                    import mimetypes
+                    mime_type, _ = mimetypes.guess_type(attachment.filename or '')
+                    if not mime_type:
+                        mime_type = 'application/octet-stream'
+                
+                attachment_list.append({
+                    "filename": attachment.filename or "attachment",
+                    "content": content,
+                    "mime_type": mime_type
+                })
+        
+        result = await mail_service.reply_email(current_user.id, email_id, reply_data, attachment_list)
         return APIResponse(data=result, message="Reply sent successfully")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to reply to email: {str(e)}")
 
 
 @router.post("/emails/send", response_model=APIResponse[dict])
 async def send_email(
-    request: SendEmailRequest,
+    to: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    cc: Optional[str] = Form(None),
+    bcc: Optional[str] = Form(None),
+    attachments: Optional[List[UploadFile]] = File(None),
     mail_service: MailService = Depends(get_mail_service),
     current_user: UserInfo = Depends(get_current_user)
 ):
-    """Send a new email."""
+    """Send a new email with optional attachments."""
     try:
-        result = await mail_service.send_email(current_user.id, request.dict())
+        # Prepare email data
+        email_data = {
+            "to": to,
+            "subject": subject,
+            "body": body,
+            "cc": cc,
+            "bcc": bcc
+        }
+        
+        # Process attachments if provided
+        attachment_list = []
+        if attachments:
+            MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB Gmail limit
+            for attachment in attachments:
+                # Read file content
+                content = await attachment.read()
+                
+                # Validate file size
+                if len(content) > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Attachment '{attachment.filename}' exceeds 25MB limit"
+                    )
+                
+                # Get MIME type
+                mime_type = attachment.content_type
+                if not mime_type:
+                    # Try to guess from filename
+                    import mimetypes
+                    mime_type, _ = mimetypes.guess_type(attachment.filename or '')
+                    if not mime_type:
+                        mime_type = 'application/octet-stream'
+                
+                attachment_list.append({
+                    "filename": attachment.filename or "attachment",
+                    "content": content,
+                    "mime_type": mime_type
+                })
+        
+        result = await mail_service.send_email(current_user.id, email_data, attachment_list)
         return APIResponse(data=result, message="Email sent successfully")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
 
 @router.post("/emails/{email_id}/modify", response_model=APIResponse[ThreadDetailResponse])
@@ -110,19 +206,41 @@ async def update_email(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @router.get("/attachments/{attachment_id}")
-# async def get_attachment(
-#     attachment_id: str,
-#     message_id: str = Query(..., description="Message ID containing the attachment"),
-#     mail_service: MailService = Depends(get_mail_service),
-#     current_user: UserInfo = Depends(get_current_user)
-# ):
-#     """Stream attachment."""
-#     try:
-#         data = await mail_service.get_attachment(current_user.id, message_id, attachment_id)
-#         # We don't know the mime type here easily without fetching message details again or passing it.
-#         # For now, default to octet-stream or try to guess?
-#         # The service just returns bytes.
-#         return Response(content=data, media_type="application/octet-stream")
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+@router.get("/attachments/{attachment_id}")
+async def get_attachment(
+    attachment_id: str,
+    message_id: str = Query(..., description="Message ID containing the attachment"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Download attachment with proper headers."""
+    try:
+        result = await mail_service.get_attachment(current_user.id, message_id, attachment_id)
+        
+        logger.info(f"[Router] Received from service - filename: {result['filename']}, mime_type: {result['mime_type']}")
+        
+        filename = result["filename"]
+        filename_ascii = filename.encode('ascii', 'ignore').decode('ascii') or 'attachment'
+        filename_encoded = quote(filename, safe='')
+        
+        logger.info(f"[Router] Filename processing - original: {filename}, ascii: {filename_ascii}, encoded: {filename_encoded}")
+        
+        headers = {
+            "Content-Disposition": (
+                f'attachment; filename="{filename_ascii}"; '
+                f'filename*=UTF-8\'\'{filename_encoded}'
+            ),
+            "Content-Type": result["mime_type"]
+        }
+        
+        logger.info(f"[Router] Response headers - Content-Disposition: {headers['Content-Disposition']}, Content-Type: {headers['Content-Type']}")
+        
+        return Response(
+            content=result["data"],
+            media_type=result["mime_type"],
+            headers=headers
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download attachment: {str(e)}")
