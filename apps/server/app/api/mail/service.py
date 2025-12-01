@@ -407,6 +407,71 @@ class MailService:
       except Exception as e:
           raise ValueError(f"Failed to reply to email: {str(e)}")
 
+  async def create_draft(self, user_id: str, draft_data: dict, attachments: list = None):
+      """Create a draft email in Gmail."""
+      from googleapiclient.errors import HttpError
+      
+      if not draft_data.get('to'):
+          raise ValueError("Recipient email address is required")
+      
+      service = await self.get_gmail_service(user_id)
+      
+      try:
+          message = MIMEMultipart()
+          message['to'] = draft_data.get('to')
+          message['subject'] = draft_data.get('subject', '(no subject)')
+          if draft_data.get('cc'):
+              message['cc'] = draft_data.get('cc')
+          if draft_data.get('bcc'):
+              message['bcc'] = draft_data.get('bcc')
+              
+          body = draft_data.get('body', '')
+          msg = MIMEText(body, 'html')
+          message.attach(msg)
+          
+          # Handle attachments
+          if attachments:
+              for attachment in attachments:
+                  try:
+                      mime_type_parts = attachment['mime_type'].split('/', 1)
+                      if len(mime_type_parts) == 2:
+                          part = MIMEBase(mime_type_parts[0], mime_type_parts[1])
+                      else:
+                          part = MIMEBase('application', 'octet-stream')
+                      
+                      part.set_payload(attachment['content'])
+                      encoders.encode_base64(part)
+                      part.add_header(
+                          'Content-Disposition',
+                          f'attachment; filename="{attachment["filename"]}"'
+                      )
+                      message.attach(part)
+                  except Exception as e:
+                      raise ValueError(f"Failed to attach file '{attachment.get('filename', 'unknown')}': {str(e)}")
+          
+          raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+          draft_body = {
+              'message': {
+                  'raw': raw
+              }
+          }
+          
+          draft = service.users().drafts().create(userId='me', body=draft_body).execute()
+          return draft
+      except HttpError as e:
+          if e.resp.status == 401:
+              raise ValueError("Authentication failed. Please refresh your Google credentials.")
+          elif e.resp.status == 403:
+              raise ValueError("Access denied. Insufficient permissions to create draft.")
+          elif e.resp.status == 400:
+              raise ValueError(f"Invalid draft format: {str(e)}")
+          else:
+              raise ValueError(f"Gmail API error: {str(e)}")
+      except ValueError:
+          raise
+      except Exception as e:
+          raise ValueError(f"Failed to create draft: {str(e)}")
+
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
       service = await self.get_gmail_service(user_id)
       

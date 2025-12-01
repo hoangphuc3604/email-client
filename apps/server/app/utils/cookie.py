@@ -15,18 +15,17 @@ def get_cookie_settings(request: Request) -> dict:
     elif is_production:
         samesite = "strict"
     else:
+        # Use "lax" in development for better cross-tab behavior
         samesite = "lax"
 
-    if is_production:
-        cookie_path = "/api/v1/auth"
-    else:
-        # use root path in development so cookies are sent for proxied requests
-        cookie_path = "/"
+    # Always use /api/v1/auth as the path for consistency
+    cookie_path = "/api/v1/auth"
     
     return {
         "httponly": True,
         "secure": is_production,
         "samesite": samesite,
         "max_age": 7 * 24 * 60 * 60,
-        "path": cookie_path
+        "path": cookie_path,
+        "domain": None  # Let browser determine the domain
     }

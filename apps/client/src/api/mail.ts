@@ -6,12 +6,14 @@ export interface SendEmailPayload {
   bcc?: string
   subject: string
   body: string
+  attachments?: File[]
 }
 
 export interface ReplyEmailPayload {
   to: string
   subject: string
   body: string
+  attachments?: File[]
 }
 
 export interface ModifyEmailPayload {
@@ -27,8 +29,10 @@ const mailApi = {
     return res.data?.data || res.data || []
   },
 
-  async listEmails(mailboxId: string) {
-    const res = await api.get(`/mail/mailboxes/${mailboxId}/emails`)
+  async listEmails(mailboxId: string, limit: number = 50) {
+    const res = await api.get(`/mail/mailboxes/${mailboxId}/emails`, {
+      params: { limit }
+    })
     return res.data?.data || res.data || { threads: [], previews: [] }
   },
 
@@ -38,12 +42,48 @@ const mailApi = {
   },
 
   async sendEmail(payload: SendEmailPayload) {
-    const res = await api.post(`/mail/emails/send`, payload)
+    // Backend expects FormData, not JSON
+    const formData = new FormData()
+    formData.append('to', payload.to)
+    formData.append('subject', payload.subject)
+    formData.append('body', payload.body)
+    if (payload.cc) formData.append('cc', payload.cc)
+    if (payload.bcc) formData.append('bcc', payload.bcc)
+    
+    // Add attachments if provided
+    if (payload.attachments && payload.attachments.length > 0) {
+      payload.attachments.forEach((file) => {
+        formData.append('attachments', file)
+      })
+    }
+    
+    const res = await api.post(`/mail/emails/send`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
     return res.data?.data || res.data
   },
 
   async replyEmail(emailId: string, payload: ReplyEmailPayload) {
-    const res = await api.post(`/mail/emails/${emailId}/reply`, payload)
+    // Backend expects FormData, not JSON
+    const formData = new FormData()
+    formData.append('to', payload.to)
+    formData.append('subject', payload.subject)
+    formData.append('body', payload.body)
+    
+    // Add attachments if provided
+    if (payload.attachments && payload.attachments.length > 0) {
+      payload.attachments.forEach((file) => {
+        formData.append('attachments', file)
+      })
+    }
+    
+    const res = await api.post(`/mail/emails/${emailId}/reply`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
     return res.data?.data || res.data
   },
 
@@ -58,10 +98,42 @@ const mailApi = {
   },
 
   async downloadAttachment(messageId: string, attachmentId: string) {
-    const res = await api.get(`/mail/attachments/${attachmentId}?messageId=${messageId}`, {
-      responseType: 'blob'
+    // Pass attachment ID as query parameter to avoid URL encoding issues
+    const res = await api.get(`/mail/attachments`, {
+      params: {
+        attachmentId: attachmentId,
+        messageId: messageId
+      },
+      responseType: 'blob',
+      headers: {
+        'Accept': 'application/octet-stream'
+      }
     })
     return res.data
+  },
+
+  async createDraft(payload: SendEmailPayload) {
+    // Backend expects FormData, not JSON
+    const formData = new FormData()
+    formData.append('to', payload.to)
+    formData.append('subject', payload.subject)
+    formData.append('body', payload.body)
+    if (payload.cc) formData.append('cc', payload.cc)
+    if (payload.bcc) formData.append('bcc', payload.bcc)
+    
+    // Add attachments if provided
+    if (payload.attachments && payload.attachments.length > 0) {
+      payload.attachments.forEach((file) => {
+        formData.append('attachments', file)
+      })
+    }
+    
+    const res = await api.post(`/mail/drafts`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return res.data?.data || res.data
   },
 }
 
