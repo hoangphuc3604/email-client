@@ -73,10 +73,11 @@
   position: relative;
 }
 .email-list {
-  overflow-y: auto; /* scroll list */
+  overflow-y: scroll; /* always show scrollbar */
   overflow-x: hidden; /* prevent horizontal scroll */
   flex-grow: 1;
   background: transparent;
+  cursor: default;
 }
 .email-list .meta-col {
   min-width: 0; /* allow flex item to shrink below content size */
