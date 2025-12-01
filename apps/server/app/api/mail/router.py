@@ -210,16 +210,16 @@ async def update_email(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/attachments/{attachment_id}")
+@router.get("/attachments")
 async def get_attachment(
-    attachment_id: str,
-    message_id: str = Query(..., description="Message ID containing the attachment"),
+    attachmentId: str = Query(..., description="Attachment ID"),
+    messageId: str = Query(..., description="Message ID containing the attachment"),
     mail_service: MailService = Depends(get_mail_service),
     current_user: UserInfo = Depends(get_current_user)
 ):
     """Download attachment with proper headers."""
     try:
-        result = await mail_service.get_attachment(current_user.id, message_id, attachment_id)
+        result = await mail_service.get_attachment(current_user.id, messageId, attachmentId)
         
         logger.info(f"[Router] Received from service - filename: {result['filename']}, mime_type: {result['mime_type']}")
         

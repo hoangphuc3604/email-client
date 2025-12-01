@@ -58,8 +58,16 @@ const mailApi = {
   },
 
   async downloadAttachment(messageId: string, attachmentId: string) {
-    const res = await api.get(`/mail/attachments/${attachmentId}?messageId=${messageId}`, {
-      responseType: 'blob'
+    // Pass attachment ID as query parameter to avoid URL encoding issues
+    const res = await api.get(`/mail/attachments`, {
+      params: {
+        attachmentId: attachmentId,
+        messageId: messageId
+      },
+      responseType: 'blob',
+      headers: {
+        'Accept': 'application/octet-stream'
+      }
     })
     return res.data
   },

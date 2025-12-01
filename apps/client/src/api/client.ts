@@ -108,6 +108,11 @@ api.interceptors.response.use(
   async (err: AxiosError) => {
     const originalRequest = err.config as AxiosRequestConfig & { _retry?: boolean }
     const status = err.response?.status
+    
+    // Log auth errors for debugging
+    if (status === 401 || status === 403) {
+      console.warn(`[Auth Error] Status: ${status}, URL: ${originalRequest.url}, Has Auth: ${!!originalRequest.headers?.['Authorization']}`)
+    }
 
     if (status === 401 && !originalRequest._retry) {
       // Don't try to refresh when calling refresh itself
