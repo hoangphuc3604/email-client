@@ -98,6 +98,9 @@ async def update_email(
     Update thread properties (mark as read/unread, star, change labels, etc.).
     """
     try:
+        print(f"[ROUTER] POST /emails/{email_id}/modify - user: {current_user.id}")
+        print(f"[ROUTER] Updates: {updates.model_dump()}")
+        
         # Convert to dict and filter out None values
         update_dict = {k: v for k, v in updates.model_dump().items() if v is not None}
         
@@ -107,22 +110,26 @@ async def update_email(
         updated_email = await mail_service.modify_email(current_user.id, email_id, update_dict)
         return APIResponse(data=updated_email, message="Email updated successfully")
     except Exception as e:
+        print(f"[ROUTER] Error in modify_email: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @router.get("/attachments/{attachment_id}")
-# async def get_attachment(
-#     attachment_id: str,
-#     message_id: str = Query(..., description="Message ID containing the attachment"),
-#     mail_service: MailService = Depends(get_mail_service),
-#     current_user: UserInfo = Depends(get_current_user)
-# ):
-#     """Stream attachment."""
-#     try:
-#         data = await mail_service.get_attachment(current_user.id, message_id, attachment_id)
-#         # We don't know the mime type here easily without fetching message details again or passing it.
-#         # For now, default to octet-stream or try to guess?
-#         # The service just returns bytes.
-#         return Response(content=data, media_type="application/octet-stream")
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+@router.get("/attachments/{attachment_id:path}")
+async def get_attachment(
+    attachment_id: str,
+    message_id: str = Query(..., description="Message ID containing the attachment"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Stream attachment. Uses :path to handle special characters in attachment IDs."""
+    try:
+        print(f"[ATTACHMENT] Downloading - messageId: {message_id}, attachmentId: {attachment_id}")
+        data = await mail_service.get_attachment(current_user.id, message_id, attachment_id)
+        print(f"[ATTACHMENT] Successfully retrieved {len(data)} bytes")
+        # Return file as octet-stream for download
+        return Response(content=data, media_type="application/octet-stream")
+    except Exception as e:
+        print(f"[ATTACHMENT] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

@@ -23,38 +23,45 @@ export interface ModifyEmailPayload {
 
 const mailApi = {
   async listMailboxes() {
-    const res = await api.get('/mock-mail/mailboxes')
+    const res = await api.get('/mail/mailboxes')
     return res.data?.data || res.data || []
   },
 
   async listEmails(mailboxId: string) {
-    const res = await api.get(`/mock-mail/mailboxes/${mailboxId}/emails`)
+    const res = await api.get(`/mail/mailboxes/${mailboxId}/emails`)
     return res.data?.data || res.data || { threads: [], previews: [] }
   },
 
   async getEmail(emailId: string) {
-    const res = await api.get(`/mock-mail/emails/${emailId}`)
+    const res = await api.get(`/mail/emails/${emailId}`)
     return res.data?.data || res.data
   },
 
   async sendEmail(payload: SendEmailPayload) {
-    const res = await api.post(`/mock-mail/emails/send`, payload)
+    const res = await api.post(`/mail/emails/send`, payload)
     return res.data?.data || res.data
   },
 
   async replyEmail(emailId: string, payload: ReplyEmailPayload) {
-    const res = await api.post(`/mock-mail/emails/${emailId}/reply`, payload)
+    const res = await api.post(`/mail/emails/${emailId}/reply`, payload)
     return res.data?.data || res.data
   },
 
   async modifyEmail(emailId: string, updates: ModifyEmailPayload) {
-    const res = await api.post(`/mock-mail/emails/${emailId}/modify`, updates)
+    const res = await api.post(`/mail/emails/${emailId}/modify`, updates)
     return res.data?.data || res.data
   },
 
   async searchEmails(query: string) {
-    const res = await api.get(`/mock-mail/search?q=${encodeURIComponent(query)}`)
+    const res = await api.get(`/mail/search?q=${encodeURIComponent(query)}`)
     return res.data?.data || res.data
+  },
+
+  async downloadAttachment(messageId: string, attachmentId: string) {
+    const res = await api.get(`/mail/attachments/${attachmentId}?messageId=${messageId}`, {
+      responseType: 'blob'
+    })
+    return res.data
   },
 }
 

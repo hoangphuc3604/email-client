@@ -140,8 +140,8 @@ class MailService:
         # Let's assume it's a message ID. If not found, raise.
         raise ValueError("Message not found")
 
-    # Fetch full thread
-    thread_data = service.users().threads().get(userId='me', id=thread_id).execute()
+    # Fetch full thread with full message format to get attachment IDs
+    thread_data = service.users().threads().get(userId='me', id=thread_id, format='full').execute()
     messages = thread_data.get('messages', [])
     
     parsed_messages = []
@@ -318,44 +318,73 @@ class MailService:
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
       service = await self.get_gmail_service(user_id)
       
+      print(f"[MODIFY EMAIL] user_id={user_id}, email_id={email_id}, updates={updates}")
+
       add_labels = []
       remove_labels = []
-      
+
+      # Handle unread/read status
       if 'unread' in updates:
           if updates['unread']:
               add_labels.append('UNREAD')
+              if 'UNREAD' in remove_labels:
+                  remove_labels.remove('UNREAD')
           else:
               remove_labels.append('UNREAD')
-              
+              if 'UNREAD' in add_labels:
+                  add_labels.remove('UNREAD')
+
+      # Handle starred status
       if 'starred' in updates:
           if updates['starred']:
               add_labels.append('STARRED')
+              if 'STARRED' in remove_labels:
+                  remove_labels.remove('STARRED')
           else:
               remove_labels.append('STARRED')
-              
+              if 'STARRED' in add_labels:
+                  add_labels.remove('STARRED')
+
+      # Handle custom labels array (e.g., labels: ['trash'] to move to trash)
       if 'labels' in updates:
-          # This is a bit complex as we need to know which labels to add/remove
-          # For now, let's assume 'labels' contains the target state of labels?
-          # Or maybe just specific label operations.
-          # The prompt says "mark read/unread, star, delete".
-          # Delete usually means move to TRASH.
-          pass
-          
+          labels_to_add = updates.get('labels', [])
+          for label in labels_to_add:
+              label_upper = label.upper()
+              if label_upper not in add_labels:
+                  add_labels.append(label_upper)
+              # Remove from remove list if it was there
+              if label_upper in remove_labels:
+                  remove_labels.remove(label_upper)
+
+      # Handle trash flag
       if updates.get('trash'):
-           add_labels.append('TRASH')
-           
+           if 'TRASH' not in add_labels:
+               add_labels.append('TRASH')
+           if 'TRASH' in remove_labels:
+               remove_labels.remove('TRASH')
+
       body = {
           'addLabelIds': add_labels,
           'removeLabelIds': remove_labels
       }
       
+      print(f"[MODIFY EMAIL] Sending to Gmail API - add: {add_labels}, remove: {remove_labels}")
+
       updated_message = service.users().messages().modify(userId='me', id=email_id, body=body).execute()
       
+      print(f"[MODIFY EMAIL] Gmail API response: {updated_message}")
+
       # We need to return the updated email detail
       return await self.get_email_detail(user_id, email_id)
 
   async def get_attachment(self, user_id: str, message_id: str, attachment_id: str):
       service = await self.get_gmail_service(user_id)
-      attachment = service.users().messages().attachments().get(userId='me', messageId=message_id, id=attachment_id).execute()
-      data = base64.urlsafe_b64decode(attachment['data'])
-      return data
+      print(f"[SERVICE] Getting attachment - user: {user_id}, message: {message_id}, attachment: {attachment_id}")
+      try:
+          attachment = service.users().messages().attachments().get(userId='me', messageId=message_id, id=attachment_id).execute()
+          print(f"[SERVICE] Gmail API returned attachment data size: {attachment.get('size', 'unknown')}")
+          data = base64.urlsafe_b64decode(attachment['data'])
+          return data
+      except Exception as e:
+          print(f"[SERVICE] Gmail API error: {str(e)}")
+          raise

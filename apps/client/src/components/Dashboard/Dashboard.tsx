@@ -32,14 +32,17 @@ import {
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 
-const mockFolders = [
-  { id: 'inbox', name: 'Inbox' },
-  { id: 'starred', name: 'Starred' },
-  { id: 'sent', name: 'Sent' },
-  { id: 'drafts', name: 'Drafts' },
-  { id: 'archive', name: 'Archive' },
-  { id: 'trash', name: 'Trash' },
-]
+// Map Gmail label IDs to friendly names
+const LABEL_NAME_MAP: Record<string, string> = {
+  'INBOX': 'Inbox',
+  'STARRED': 'Starred',
+  'SENT': 'Sent',
+  'DRAFT': 'Drafts',
+  'TRASH': 'Trash',
+}
+
+// Gmail system labels we want to display
+const ESSENTIAL_LABELS = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH']
 
 function timeAgo(ts: number) {
   const s = Math.floor((Date.now() - ts) / 1000)
@@ -101,40 +104,31 @@ export default function Dashboard() {
     setLoading(true)
     try {
       const data = await mailApi.listMailboxes()
-      // data is array of {id,name,...}
-      // Filter to only show essential system labels
-      const essentialLabels = ['INBOX', 'STARRED', 'SENT', 'DRAFTS', 'ARCHIVE', 'TRASH']
+      // Filter to only show essential system labels (Gmail standard labels)
       const filtered = (data || []).filter((box: any) => 
-        essentialLabels.includes(String(box.id).toUpperCase())
+        ESSENTIAL_LABELS.includes(String(box.id).toUpperCase())
       ).map((box: any) => ({
         ...box,
         id: String(box.id).toLowerCase(), // normalize to lowercase for UI
+        name: LABEL_NAME_MAP[String(box.id).toUpperCase()] || box.name,
         unreadCount: box.unread_count || 0
       }))
-      setMailboxes(filtered.length > 0 ? filtered : mockFolders)
+      setMailboxes(filtered.length > 0 ? filtered : [])
       // Load ALL folders on initial load to populate previewsMap
-      await loadAllFoldersInitial()
+      await loadAllFoldersInitial(filtered.map((f: { id: any }) => f.id))
     } catch (e) {
       console.error('Error loading mailboxes:', e)
-      // fallback to mock folders
-      setMailboxes(mockFolders)
+      setMailboxes([])
     } finally {
       setLoading(false)
     }
   }
 
-  async function loadAllFoldersInitial() {
-    // Check if we have cached data - but always reload on mount to check for attachments
-    // since attachment info might not be in the cache
-    
-    // For now, always do a fresh load to ensure attachments are properly checked
-    // In the future, we could store attachment info in cache as well
-    
+  async function loadAllFoldersInitial(folderIds: string[]) {
+    // Load all Gmail folders into previewsMap
     try {
-      // Load all essential folders into previewsMap
-      const folders = ['inbox', 'starred', 'sent', 'drafts', 'archive', 'trash']
       const results = await Promise.all(
-        folders.map(async (folderId) => {
+        folderIds.map(async (folderId) => {
           try {
             const res = await mailApi.listEmails(folderId)
             const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
@@ -147,66 +141,9 @@ export default function Dashboard() {
       
       const newPreviewsMap: Record<string, any[]> = {}
       
-      // First, process starred folder to get starred email IDs
-      const starredResult = results.find(r => r.folderId === 'starred')
-      const starredIds = new Set((starredResult?.previews || []).map((e: any) => e.id))
-      
-      // Ensure starred emails have the starred label
-      if (starredResult) {
-        newPreviewsMap['starred'] = starredResult.previews.map((e: any) => ({
-          ...e,
-          labels: [...new Set([...(e.labels || []), 'starred'])]
-        }))
-      }
-      
-      // Check inbox emails for attachments by fetching full details
-      const inboxResult = results.find(r => r.folderId === 'inbox')
-      const inboxWithAttachments: string[] = []
-      const archiveResult = results.find(r => r.folderId === 'archive')
-      const archiveEmails = [...(archiveResult?.previews || [])]
-      
-      if (inboxResult && inboxResult.previews.length > 0) {
-        // Fetch full details for inbox emails to check attachments
-        const detailChecks = await Promise.all(
-          inboxResult.previews.map(async (preview: any) => {
-            try {
-              const detail = await mailApi.getEmail(preview.id)
-              const message = detail.latest || detail.messages?.[0] || detail
-              const hasAttachments = message.attachments && message.attachments.length > 0
-              return { id: preview.id, hasAttachments, attachments: message.attachments, preview }
-            } catch (e) {
-              return { id: preview.id, hasAttachments: false, attachments: [], preview }
-            }
-          })
-        )
-        
-        // Move emails with attachments to archive
-        detailChecks.forEach(({ id, hasAttachments, attachments, preview }) => {
-          if (hasAttachments && !starredIds.has(id)) {
-            inboxWithAttachments.push(id)
-            archiveEmails.push({
-              ...preview,
-              attachments,
-              labels: [...new Set([...(preview.labels || []), 'archive'])]
-            })
-          }
-        })
-      }
-      
-      const attachmentIds = new Set(inboxWithAttachments)
-      
-      // Process other folders
+      // Process each folder
       results.forEach(({ folderId, previews }) => {
-        if (folderId === 'starred') return // Already processed
-        
-        if (folderId === 'inbox') {
-          // Filter out starred emails and emails with attachments
-          newPreviewsMap[folderId] = previews.filter((e: any) => !starredIds.has(e.id) && !attachmentIds.has(e.id))
-        } else if (folderId === 'archive') {
-          newPreviewsMap[folderId] = archiveEmails
-        } else {
-          newPreviewsMap[folderId] = previews
-        }
+        newPreviewsMap[folderId] = previews
       })
       
       setPreviewsMap(newPreviewsMap)
@@ -228,9 +165,20 @@ export default function Dashboard() {
         ? message.sender 
         : (message.sender?.name || message.sender?.email || 'Unknown')
       
+      // Find the actual message ID - it could be in different places
+      const actualMessageId = message.id || message.message_id || email.id
+      console.log('Message IDs:', { 
+        messageId: message.id, 
+        message_id: message.message_id, 
+        emailId: email.id,
+        actualMessageId,
+        attachments: message.attachments 
+      })
+      
       setSelectedEmail({
         ...message,
         id: email.id, // Keep the original preview ID for consistency
+        messageId: actualMessageId, // Store the actual message ID for attachments
         sender: senderStr,
         // Use processed_html if available, otherwise body
         body: message.processed_html || message.body || message.decoded_body || '',
@@ -239,6 +187,15 @@ export default function Dashboard() {
         cc: message.cc || [],
         attachments: message.attachments || []
       })
+      
+      // Mark as read on backend if it was unread
+      if (email.unread) {
+        try {
+          await mailApi.modifyEmail(email.id, { unread: false })
+        } catch (e) {
+          console.error('Failed to mark email as read on backend:', e)
+        }
+      }
     } catch (err) {
       console.error('Error loading email:', err)
       // fallback to using the preview item as detail
@@ -296,7 +253,7 @@ export default function Dashboard() {
     else setSelectedIds(Object.fromEntries(displayList.map((e) => [e.id, true])))
   }
 
-  function deleteSelected() {
+  async function deleteSelected() {
     const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
     if (ids.size === 0) return
     
@@ -317,12 +274,14 @@ export default function Dashboard() {
       return
     }
     
-    // Try backend, but work locally regardless
-    for (const id of Array.from(ids)) {
-      try {
-        mailApi.modifyEmail(id, { labels: ['trash'] }).catch(() => {})
-      } catch (e) {}
-    }
+    // Call backend API for each selected email to move to trash
+    const promises = Array.from(ids).map(id => 
+      mailApi.modifyEmail(id, { trash: true })
+        .catch(err => console.error(`Failed to delete email ${id}:`, err))
+    )
+    
+    // Wait for all backend calls to complete (fire and forget style)
+    Promise.all(promises).catch(() => {})
     
     // Move emails to trash locally by updating previewsMap
     setPreviewsMap((prev) => {
@@ -353,10 +312,58 @@ export default function Dashboard() {
     setSelectedIds({})
   }
 
-  function downloadAttachment(attachment: any) {
-    // Note: This is mock data - in production, this would fetch the actual file from the server
-    // For now, show an alert explaining this is a demo
-    alert(`Mock Attachment Download\n\nFilename: ${attachment.filename}\nSize: ${Math.round(attachment.size / 1024)} KB\nType: ${attachment.mime_type}\n\nNote: This is a demonstration with mock data. In a production environment, this would download the actual file from the server.`)
+  async function downloadAttachment(attachment: any) {
+    // Download attachment from backend
+    if (!selectedEmail) return
+    
+    console.log('Full attachment object:', attachment)
+    console.log('Selected email:', { 
+      id: selectedEmail.id, 
+      messageId: selectedEmail.messageId,
+      attachments: selectedEmail.attachments 
+    })
+    
+    // Get the correct attachment ID - could be attachment_id or attachmentId
+    const attachmentId = attachment.attachment_id || attachment.attachmentId
+    
+    if (!attachmentId) {
+      console.error('Attachment ID is missing:', attachment)
+      alert('Cannot download attachment: ID is missing. Please try refreshing the email.')
+      return
+    }
+    
+    // Use the message ID from the attachment itself (most accurate)
+    // Fallback to selectedEmail's messageId, then email id
+    const messageId = attachment.messageId || attachment.message_id || selectedEmail.messageId || selectedEmail.id
+    
+    if (!messageId) {
+      console.error('Message ID is missing from attachment and selectedEmail')
+      alert('Cannot download attachment: Message ID is missing. Please try refreshing the email.')
+      return
+    }
+    
+    try {
+      console.log('Downloading attachment:', { messageId, attachmentId, filename: attachment.filename || attachment.name })
+      // Get the blob from the backend
+      const blob = await mailApi.downloadAttachment(messageId, attachmentId)
+      
+      // Create a temporary URL for the blob
+      const url = window.URL.createObjectURL(blob)
+      
+      // Create a temporary link element and trigger download
+      const link = document.createElement('a')
+      link.href = url
+      link.download = attachment.filename || attachment.name || 'attachment'
+      document.body.appendChild(link)
+      link.click()
+      
+      // Clean up
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Failed to download attachment:', error)
+      alert('Failed to download attachment. Please try again.')
+    }
   }
 
   function deleteCurrentEmail() {
@@ -423,18 +430,20 @@ export default function Dashboard() {
     setMobileView('list')
   }
 
-  function markReadUnread(makeRead: boolean) {
+  async function markReadUnread(makeRead: boolean) {
     const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
     if (ids.size === 0) return
     
-    // Try backend
-    for (const id of Array.from(ids)) {
-      try {
-        mailApi.modifyEmail(id, { unread: !makeRead }).catch(() => {})
-      } catch (e) {}
-    }
+    // Call backend API for each selected email
+    const promises = Array.from(ids).map(id => 
+      mailApi.modifyEmail(id, { unread: !makeRead })
+        .catch(err => console.error(`Failed to mark email ${id} as ${makeRead ? 'read' : 'unread'}:`, err))
+    )
     
-    // Update locally in all folders
+    // Wait for all backend calls to complete (fire and forget style)
+    Promise.all(promises).catch(() => {})
+    
+    // Update locally in all folders immediately for UI responsiveness
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       Object.keys(updated).forEach(folder => {
@@ -448,55 +457,33 @@ export default function Dashboard() {
     setSelectedIds({})
   }
 
-  function toggleStar(email: any) {
-    const hasStar = (email.labels || []).includes('starred')
+  async function toggleStar(email: any) {
+    const hasStar = (email.labels || []).includes('starred') || (email.labels || []).includes('STARRED')
     
-    // Try backend
+    // Call backend API with starred boolean
     try {
-      const newLabels = hasStar 
-        ? (email.labels || []).filter((l: string) => l !== 'starred') 
-        : [...(email.labels || []), 'starred']
-      mailApi.modifyEmail(email.id, { labels: newLabels }).catch(() => {})
-    } catch (e) {}
+      await mailApi.modifyEmail(email.id, { starred: !hasStar })
+      console.log(`Successfully ${hasStar ? 'unstarred' : 'starred'} email ${email.id}`)
+    } catch (e) {
+      console.error('Failed to toggle star on backend:', e)
+    }
     
-    // Update locally in previewsMap
-    // Starred emails should ONLY appear in Starred folder, not in Inbox
+    // Update locally - just toggle the starred label, don't move between folders
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       
-      if (hasStar) {
-        // Unstar: move from starred back to inbox
-        const starredEmail = (updated['starred'] || []).find((e: any) => e.id === email.id)
-        if (starredEmail) {
-          // Remove from starred folder
-          updated['starred'] = (updated['starred'] || []).filter((e: any) => e.id !== email.id)
-          
-          // Add back to inbox with starred label removed
-          const unstarredEmail = {
-            ...starredEmail,
-            labels: (starredEmail.labels || []).filter((l: string) => l !== 'starred')
+      Object.keys(updated).forEach(folder => {
+        updated[folder] = updated[folder].map((e: any) => {
+          if (e.id === email.id) {
+            const currentLabels = e.labels || []
+            const newLabels = hasStar
+              ? currentLabels.filter((l: string) => l !== 'starred' && l !== 'STARRED')
+              : [...new Set([...currentLabels, 'STARRED'])]
+            return { ...e, labels: newLabels }
           }
-          updated['inbox'] = [unstarredEmail, ...(updated['inbox'] || [])]
-        }
-      } else {
-        // Star: move from inbox to starred
-        const inboxEmail = (updated['inbox'] || []).find((e: any) => e.id === email.id)
-        if (inboxEmail) {
-          // Remove from inbox
-          updated['inbox'] = (updated['inbox'] || []).filter((e: any) => e.id !== email.id)
-          
-          // Add to starred folder with starred label
-          const starredEmail = {
-            ...inboxEmail,
-            labels: [...new Set([...(inboxEmail.labels || []), 'starred'])]
-          }
-          updated['starred'] = [starredEmail, ...(updated['starred'] || [])]
-        } else {
-          // If not in inbox, still add to starred (could be from other folders)
-          const emailToStar = { ...email, labels: [...new Set([...(email.labels || []), 'starred'])] }
-          updated['starred'] = [emailToStar, ...(updated['starred'] || [])]
-        }
-      }
+          return e
+        })
+      })
       
       return updated
     })
@@ -509,10 +496,10 @@ export default function Dashboard() {
       // Clear localStorage cache
       localStorage.removeItem('email_previews_map')
       
-      // Reload all folders
-      const folders = ['inbox', 'starred', 'sent', 'drafts', 'archive', 'trash']
+      // Reload all folders (from the current mailboxes state)
+      const folderIds = mailboxes.map(m => m.id)
       const results = await Promise.all(
-        folders.map(async (folderId) => {
+        folderIds.map(async (folderId) => {
           try {
             const res = await mailApi.listEmails(folderId)
             const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
@@ -525,65 +512,9 @@ export default function Dashboard() {
       
       const newPreviewsMap: Record<string, any[]> = {}
       
-      // Process starred folder first
-      const starredResult = results.find(r => r.folderId === 'starred')
-      const starredIds = new Set((starredResult?.previews || []).map((e: any) => e.id))
-      
-      if (starredResult) {
-        newPreviewsMap['starred'] = starredResult.previews.map((e: any) => ({
-          ...e,
-          labels: [...new Set([...(e.labels || []), 'starred'])]
-        }))
-      }
-      
-      // Check inbox emails for attachments by fetching full details
-      const inboxResult = results.find(r => r.folderId === 'inbox')
-      const inboxWithAttachments: string[] = []
-      const archiveResult = results.find(r => r.folderId === 'archive')
-      const archiveEmails = [...(archiveResult?.previews || [])]
-      
-      if (inboxResult && inboxResult.previews.length > 0) {
-        // Fetch full details for inbox emails to check attachments
-        const detailChecks = await Promise.all(
-          inboxResult.previews.map(async (preview: any) => {
-            try {
-              const detail = await mailApi.getEmail(preview.id)
-              const message = detail.latest || detail.messages?.[0] || detail
-              const hasAttachments = message.attachments && message.attachments.length > 0
-              return { id: preview.id, hasAttachments, attachments: message.attachments, preview }
-            } catch (e) {
-              return { id: preview.id, hasAttachments: false, attachments: [], preview }
-            }
-          })
-        )
-        
-        // Move emails with attachments to archive
-        detailChecks.forEach(({ id, hasAttachments, attachments, preview }) => {
-          if (hasAttachments && !starredIds.has(id)) {
-            inboxWithAttachments.push(id)
-            archiveEmails.push({
-              ...preview,
-              attachments,
-              labels: [...new Set([...(preview.labels || []), 'archive'])]
-            })
-          }
-        })
-      }
-      
-      const attachmentIds = new Set(inboxWithAttachments)
-      
-      // Process other folders
+      // Process each folder
       results.forEach(({ folderId, previews }) => {
-        if (folderId === 'starred') return
-        
-        if (folderId === 'inbox') {
-          // Filter out starred emails and emails with attachments
-          newPreviewsMap[folderId] = previews.filter((e: any) => !starredIds.has(e.id) && !attachmentIds.has(e.id))
-        } else if (folderId === 'archive') {
-          newPreviewsMap[folderId] = archiveEmails
-        } else {
-          newPreviewsMap[folderId] = previews
-        }
+        newPreviewsMap[folderId] = previews
       })
       
       setPreviewsMap(newPreviewsMap)
@@ -691,8 +622,13 @@ export default function Dashboard() {
     if (el) el.scrollIntoView({ block: 'nearest' })
   }, [cursorIndex, displayList])
 
+  const hasLoadedRef = useRef(false)
+  
   useEffect(() => {
-    loadMailboxes()
+    if (!hasLoadedRef.current) {
+      hasLoadedRef.current = true
+      loadMailboxes()
+    }
   }, [])
 
   return (
@@ -791,7 +727,7 @@ export default function Dashboard() {
                       className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
                       onClick={() => { setCursorIndex(idx); openEmail(email) }}
                     >
-                      <div className="checkbox-col me-2">
+                      <div className="checkbox-col me-2" onClick={(e) => e.stopPropagation()}>
                         <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
                       </div>
                       <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
