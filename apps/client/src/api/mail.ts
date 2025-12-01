@@ -111,6 +111,30 @@ const mailApi = {
     })
     return res.data
   },
+
+  async createDraft(payload: SendEmailPayload) {
+    // Backend expects FormData, not JSON
+    const formData = new FormData()
+    formData.append('to', payload.to)
+    formData.append('subject', payload.subject)
+    formData.append('body', payload.body)
+    if (payload.cc) formData.append('cc', payload.cc)
+    if (payload.bcc) formData.append('bcc', payload.bcc)
+    
+    // Add attachments if provided
+    if (payload.attachments && payload.attachments.length > 0) {
+      payload.attachments.forEach((file) => {
+        formData.append('attachments', file)
+      })
+    }
+    
+    const res = await api.post(`/mail/drafts`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return res.data?.data || res.data
+  },
 }
 
 export { mailApi }

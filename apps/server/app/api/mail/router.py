@@ -210,6 +210,68 @@ async def update_email(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/drafts", response_model=APIResponse[dict])
+async def create_draft(
+    to: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    cc: Optional[str] = Form(None),
+    bcc: Optional[str] = Form(None),
+    attachments: Optional[List[UploadFile]] = File(None),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Create a draft email with optional attachments."""
+    try:
+        # Prepare draft data
+        draft_data = {
+            "to": to,
+            "subject": subject,
+            "body": body,
+            "cc": cc,
+            "bcc": bcc
+        }
+        
+        # Process attachments if provided
+        attachment_list = []
+        if attachments:
+            MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB Gmail limit
+            for attachment in attachments:
+                # Read file content
+                content = await attachment.read()
+                
+                # Validate file size
+                if len(content) > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Attachment '{attachment.filename}' exceeds 25MB limit"
+                    )
+                
+                # Get MIME type
+                mime_type = attachment.content_type
+                if not mime_type:
+                    # Try to guess from filename
+                    import mimetypes
+                    mime_type, _ = mimetypes.guess_type(attachment.filename or '')
+                    if not mime_type:
+                        mime_type = 'application/octet-stream'
+                
+                attachment_list.append({
+                    "filename": attachment.filename or "attachment",
+                    "content": content,
+                    "mime_type": mime_type
+                })
+        
+        result = await mail_service.create_draft(current_user.id, draft_data, attachment_list)
+        return APIResponse(data=result, message="Draft created successfully")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create draft: {str(e)}")
+
+
 @router.get("/attachments")
 async def get_attachment(
     attachmentId: str = Query(..., description="Attachment ID"),

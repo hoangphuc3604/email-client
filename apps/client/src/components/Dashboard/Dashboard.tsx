@@ -475,6 +475,9 @@ export default function Dashboard() {
   
   async function refreshFolder() {
     // Hard refresh: clear cache and reload from backend
+    setSelectedEmail(null)
+    setSelectedIds({})
+    setMobileView('list')
     setLoading(true)
     try {
       // Clear localStorage cache
@@ -507,8 +510,6 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-    setSelectedEmail(null)
-    setSelectedIds({})
   }
 
   const [composeTo, setComposeTo] = useState('')
@@ -543,9 +544,34 @@ export default function Dashboard() {
     console.log('[Reply] Modal should now be visible. showReply:', true)
   }
 
-  function handleCloseReply() {
-    if (replyBody && replyBody.trim() && !confirm('Discard this reply?')) {
-      return
+  async function handleCloseReply() {
+    if (replyBody && replyBody.trim()) {
+      const saveToDraft = confirm('Save this reply to drafts before closing?')
+      if (saveToDraft) {
+        try {
+          await mailApi.createDraft({
+            to: replyTo,
+            subject: replySubject || '(no subject)',
+            body: replyBody,
+            attachments: replyAttachments.length > 0 ? replyAttachments : undefined
+          })
+
+          setShowReply(false)
+          setReplyTo('')
+          setReplySubject('')
+          setReplyBody('')
+          setReplyAttachments([])
+          setReplyingToId(null)
+
+          alert('Draft saved successfully!')
+          // Refresh folder immediately to show draft
+          await refreshFolder()
+        } catch (e: any) {
+          console.error('Failed to save draft:', e)
+          alert(`Failed to save draft: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
+          return
+        }
+      }
     }
     setShowReply(false)
     setReplyTo('')
@@ -581,21 +607,49 @@ export default function Dashboard() {
       setReplyBody('')
       setReplyAttachments([])
       setReplyingToId(null)
+
+      alert('Reply sent successfully!')
       
       await refreshFolder()
       
-      alert('Reply sent successfully!')
     } catch (e: any) {
       console.error('Failed to send reply:', e)
       alert(`Failed to send reply: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
     }
   }
 
-  function handleCloseCompose() {
+  async function handleCloseCompose() {
     // Check if there's unsaved content
     if (composeTo || composeCc || composeBcc || composeSubject || composeBody || composeAttachments.length > 0) {
-      if (!confirm('Discard this draft?')) {
-        return
+      const saveToDraft = confirm('Save this email to drafts before closing?')
+      if (saveToDraft) {
+        try {
+          await mailApi.createDraft({
+            to: composeTo,
+            cc: composeCc || undefined,
+            bcc: composeBcc || undefined,
+            subject: composeSubject || '(no subject)',
+            body: composeBody,
+            attachments: composeAttachments.length > 0 ? composeAttachments : undefined
+          })
+          
+          setShowCompose(false)
+          setComposeTo('')
+          setComposeCc('')
+          setComposeBcc('')
+          setComposeSubject('')
+          setComposeBody('')
+          setComposeAttachments([])
+          setShowCcBcc(false)
+
+          // Refresh folder immediately to show draft
+          alert('Draft saved successfully!')
+          await refreshFolder()
+        } catch (e: any) {
+          console.error('Failed to save draft:', e)
+          alert(`Failed to save draft: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
+          return
+        }
       }
     }
     
@@ -636,10 +690,10 @@ export default function Dashboard() {
       setComposeAttachments([])
       setShowCcBcc(false)
       
+      alert('Email sent successfully!')
       // Silently refresh in background
       await refreshFolder()
       
-      alert('Email sent successfully!')
     } catch (e: any) {
       console.error('Failed to send email:', e)
       alert(`Failed to send email: ${e.response?.data?.detail || e.message || 'Unknown error'}`)

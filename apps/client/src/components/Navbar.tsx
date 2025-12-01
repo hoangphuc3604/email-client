@@ -7,13 +7,10 @@ import { Link } from "react-router-dom";
 import { useNavigate } from 'react-router-dom'
 import { ImBlog } from "react-icons/im";
 import {
-  AiOutlineHome,
   AiOutlineFundProjectionScreen,
   AiOutlineUser,
   AiOutlineLogout,
 } from "react-icons/ai";
-
-import { CgFileDocument } from "react-icons/cg";
 import useAuthStore from '../store/authStore'
 import { useLogout } from '../hooks/useAuth'
 
@@ -84,22 +81,6 @@ function NavBar() {
         </Navbar.Toggle>
         <Navbar.Collapse id="responsive-navbar-nav">
           <Nav className="ms-auto" defaultActiveKey="#home">
-            <Nav.Item>
-              <Nav.Link as={Link} to="/" onClick={() => updateExpanded(false)}>
-                <AiOutlineHome style={{ marginBottom: "2px" }} /> Home
-              </Nav.Link>
-            </Nav.Item>
-
-            <Nav.Item>
-              <Nav.Link
-                as={Link}
-                to="/about"
-                onClick={() => updateExpanded(false)}
-              >
-                <CgFileDocument style={{ marginBottom: "2px" }} /> About
-              </Nav.Link>
-            </Nav.Item>
-
             <Nav.Item>
               <Nav.Link
                 as={Link}
