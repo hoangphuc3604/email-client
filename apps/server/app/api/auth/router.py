@@ -119,13 +119,14 @@ async def refresh_token(
     auth_service: AuthService = Depends(get_auth_service)
 ):
     if not refresh_token:
+        print(f"[REFRESH] No refresh token cookie found. Cookies received: {request.cookies}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token not found"
+            detail="Refresh token not found in cookies"
         )
     
     try:
-        print(refresh_token)
+        print(f"[REFRESH] Received refresh token: {refresh_token[:50]}...")
         result = await auth_service.refresh_access_token(refresh_token)
         
         cookie_settings = get_cookie_settings(request)
@@ -162,10 +163,10 @@ async def logout(
         except:
             pass
     
-    cookie_settings = get_cookie_settings(request)
+    # Delete cookie with the same path it was set with
     response.delete_cookie(
         key="refresh_token",
-        path=cookie_settings["path"]
+        path="/api/v1/auth"
     )
     
     return APIResponse(data=None, message="Logged out successfully")

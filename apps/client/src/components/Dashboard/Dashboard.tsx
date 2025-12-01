@@ -456,39 +456,23 @@ export default function Dashboard() {
     
     setSelectedIds({})
   }
-
+  
   async function toggleStar(email: any) {
     const hasStar = (email.labels || []).includes('starred') || (email.labels || []).includes('STARRED')
     
-    // Call backend API with starred boolean
+    // Call backend API in background
     try {
       await mailApi.modifyEmail(email.id, { starred: !hasStar })
       console.log(`Successfully ${hasStar ? 'unstarred' : 'starred'} email ${email.id}`)
+      
+      // Refresh the current folder to show updated starred status
+      await refreshFolder()
     } catch (e) {
       console.error('Failed to toggle star on backend:', e)
+      alert('Failed to update star status')
     }
-    
-    // Update locally - just toggle the starred label, don't move between folders
-    setPreviewsMap((prev) => {
-      const updated = { ...prev }
-      
-      Object.keys(updated).forEach(folder => {
-        updated[folder] = updated[folder].map((e: any) => {
-          if (e.id === email.id) {
-            const currentLabels = e.labels || []
-            const newLabels = hasStar
-              ? currentLabels.filter((l: string) => l !== 'starred' && l !== 'STARRED')
-              : [...new Set([...currentLabels, 'STARRED'])]
-            return { ...e, labels: newLabels }
-          }
-          return e
-        })
-      })
-      
-      return updated
-    })
   }
-
+  
   async function refreshFolder() {
     // Hard refresh: clear cache and reload from backend
     setLoading(true)
@@ -528,73 +512,138 @@ export default function Dashboard() {
   }
 
   const [composeTo, setComposeTo] = useState('')
+  const [composeCc, setComposeCc] = useState('')
+  const [composeBcc, setComposeBcc] = useState('')
   const [composeSubject, setComposeSubject] = useState('')
   const [composeBody, setComposeBody] = useState('')
+  const [composeAttachments, setComposeAttachments] = useState<File[]>([])
+  const [showCcBcc, setShowCcBcc] = useState(false)
+  
+  const [showReply, setShowReply] = useState(false)
+  const [replyTo, setReplyTo] = useState('')
+  const [replySubject, setReplySubject] = useState('')
+  const [replyBody, setReplyBody] = useState('')
+  const [replyAttachments, setReplyAttachments] = useState<File[]>([])
+  const [replyingToId, setReplyingToId] = useState<string | null>(null)
 
-  function saveDraft() {
-    // Only save if there's any content
-    if (!composeTo && !composeSubject && !composeBody) return
+  function handleReply(email: any) {
+    console.log('[Reply] Opening reply modal for email:', email?.id, email)
     
-    const draftEmail = {
-      id: `draft_${Date.now()}`,
-      sender: 'You',
-      to: composeTo ? [{ email: composeTo }] : [],
-      subject: composeSubject || '(no subject)',
-      body: composeBody,
-      preview: (composeBody || '').slice(0, 80) || '(Draft email)',
-      read: true,
-      unread: false,
-      labels: ['drafts'],
-      timestamp: Date.now(),
-      attachments: [],
+    // Populate reply fields
+    const senderEmail = typeof email.sender === 'string' 
+      ? email.sender 
+      : (email.sender?.email || 'unknown@example.com')
+    
+    setReplyTo(senderEmail)
+    setReplySubject(email.subject?.startsWith('Re:') ? email.subject : `Re: ${email.subject || '(no subject)'}`)
+    setReplyBody(`\n\n--- Original Message ---\nFrom: ${email.sender}\nSubject: ${email.subject || '(no subject)'}\n\n`)
+    setReplyingToId(email.id)
+    setShowReply(true)
+    
+    console.log('[Reply] Modal should now be visible. showReply:', true)
+  }
+
+  function handleCloseReply() {
+    if (replyBody && replyBody.trim() && !confirm('Discard this reply?')) {
+      return
+    }
+    setShowReply(false)
+    setReplyTo('')
+    setReplySubject('')
+    setReplyBody('')
+    setReplyAttachments([])
+    setReplyingToId(null)
+  }
+
+  async function sendReply() {
+    if (!replyTo || !replyTo.trim()) {
+      alert('Please enter a recipient email address')
+      return
     }
     
-    // Add to drafts folder
-    setPreviewsMap((prev) => ({
-      ...prev,
-      drafts: [draftEmail, ...(prev['drafts'] || [])]
-    }))
+    if (!replyingToId) {
+      alert('Error: Original email ID is missing')
+      return
+    }
+    
+    try {
+      // Use the reply API endpoint instead of send
+      await mailApi.replyEmail(replyingToId, {
+        to: replyTo,
+        subject: replySubject || '(no subject)',
+        body: replyBody,
+        attachments: replyAttachments.length > 0 ? replyAttachments : undefined
+      })
+      
+      setShowReply(false)
+      setReplyTo('')
+      setReplySubject('')
+      setReplyBody('')
+      setReplyAttachments([])
+      setReplyingToId(null)
+      
+      await refreshFolder()
+      
+      alert('Reply sent successfully!')
+    } catch (e: any) {
+      console.error('Failed to send reply:', e)
+      alert(`Failed to send reply: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
+    }
   }
 
   function handleCloseCompose() {
-    saveDraft()
+    // Check if there's unsaved content
+    if (composeTo || composeCc || composeBcc || composeSubject || composeBody || composeAttachments.length > 0) {
+      if (!confirm('Discard this draft?')) {
+        return
+      }
+    }
+    
     setShowCompose(false)
     setComposeTo('')
+    setComposeCc('')
+    setComposeBcc('')
     setComposeSubject('')
     setComposeBody('')
+    setComposeAttachments([])
+    setShowCcBcc(false)
   }
 
   async function sendCompose() {
-    const sentEmail = {
-      id: `m_${Date.now()}`,
-      sender: 'You',
-      subject: composeSubject || '(no subject)',
-      body: composeBody,
-      preview: (composeBody || '').slice(0, 80),
-      read: true,
-      unread: false,
-      labels: ['sent'],
-      timestamp: Date.now(),
-      attachments: [],
+    if (!composeTo || !composeTo.trim()) {
+      alert('Please enter a recipient email address')
+      return
     }
     
-    // Add to sent folder immediately
-    setPreviewsMap((prev) => ({
-      ...prev,
-      sent: [sentEmail, ...(prev['sent'] || [])]
-    }))
-    
-    // Try to send via backend (but don't wait for it)
     try {
-      mailApi.sendEmail({ to: composeTo, subject: composeSubject, body: composeBody }).catch(() => {})
-    } catch (e) {
+      // Actually send via Gmail API and wait for response
+      await mailApi.sendEmail({ 
+        to: composeTo, 
+        cc: composeCc || undefined,
+        bcc: composeBcc || undefined,
+        subject: composeSubject || '(no subject)', 
+        body: composeBody,
+        attachments: composeAttachments.length > 0 ? composeAttachments : undefined
+      })
+      
+      // Close compose window after successful send
+      setShowCompose(false)
+      setComposeTo('')
+      setComposeCc('')
+      setComposeBcc('')
+      setComposeSubject('')
+      setComposeBody('')
+      setComposeAttachments([])
+      setShowCcBcc(false)
+      
+      // Silently refresh in background
+      await refreshFolder()
+      
+      alert('Email sent successfully!')
+    } catch (e: any) {
       console.error('Failed to send email:', e)
+      alert(`Failed to send email: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
     }
-    
-    setShowCompose(false)
-    setComposeTo('')
-    setComposeSubject('')
-    setComposeBody('')
   }
 
   useEffect(() => {
@@ -764,7 +813,7 @@ export default function Dashboard() {
               <Card className="email-detail-card">
                 <Card.Header className="d-flex align-items-center">
                   <div className="me-2">
-                    <Button variant="outline-secondary" size="sm" onClick={() => { /* reply mock */ }}>
+                    <Button variant="outline-secondary" size="sm" onClick={() => handleReply(selectedEmail)}>
                       <FaReply />
                     </Button>
                     <Button variant="outline-secondary" size="sm" className="ms-1" onClick={() => { /* forward mock */ }}>
@@ -876,7 +925,7 @@ export default function Dashboard() {
         </Row>
       </Container>
 
-      <Modal show={showCompose} onHide={handleCloseCompose}>
+      <Modal show={showCompose} onHide={handleCloseCompose} size="lg">
         <Modal.Header closeButton>
           <Modal.Title>Compose</Modal.Title>
         </Modal.Header>
@@ -884,21 +933,103 @@ export default function Dashboard() {
           <Form>
             <Form.Group className="mb-2">
               <Form.Label>To</Form.Label>
-              <Form.Control value={composeTo} onChange={(e) => setComposeTo(e.target.value)} />
+              <Form.Control value={composeTo} onChange={(e) => setComposeTo(e.target.value)} placeholder="recipient@example.com" />
             </Form.Group>
+            
+            {!showCcBcc && (
+              <div className="mb-2">
+                <Button variant="link" size="sm" onClick={() => setShowCcBcc(true)}>+ Add Cc/Bcc</Button>
+              </div>
+            )}
+            
+            {showCcBcc && (
+              <>
+                <Form.Group className="mb-2">
+                  <Form.Label>Cc</Form.Label>
+                  <Form.Control value={composeCc} onChange={(e) => setComposeCc(e.target.value)} placeholder="Optional" />
+                </Form.Group>
+                <Form.Group className="mb-2">
+                  <Form.Label>Bcc</Form.Label>
+                  <Form.Control value={composeBcc} onChange={(e) => setComposeBcc(e.target.value)} placeholder="Optional" />
+                </Form.Group>
+              </>
+            )}
+            
             <Form.Group className="mb-2">
               <Form.Label>Subject</Form.Label>
               <Form.Control value={composeSubject} onChange={(e) => setComposeSubject(e.target.value)} />
             </Form.Group>
-            <Form.Group>
+            <Form.Group className="mb-2">
               <Form.Label>Body</Form.Label>
-              <Form.Control as="textarea" rows={6} value={composeBody} onChange={(e) => setComposeBody(e.target.value)} />
+              <Form.Control as="textarea" rows={8} value={composeBody} onChange={(e) => setComposeBody(e.target.value)} />
+            </Form.Group>
+            <Form.Group>
+              <Form.Label>Attachments</Form.Label>
+              <Form.Control 
+                type="file" 
+                multiple 
+                onChange={(e: any) => {
+                  const files = Array.from(e.target.files || [])
+                  setComposeAttachments(files as File[])
+                }}
+              />
+              {composeAttachments.length > 0 && (
+                <div className="mt-2">
+                  <small className="text-muted">
+                    {composeAttachments.length} file(s) selected: {composeAttachments.map(f => f.name).join(', ')}
+                  </small>
+                </div>
+              )}
             </Form.Group>
           </Form>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={handleCloseCompose}>Cancel</Button>
           <Button variant="primary" onClick={sendCompose}>Send</Button>
+        </Modal.Footer>
+      </Modal>
+      
+      <Modal show={showReply} onHide={handleCloseReply} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Reply</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group className="mb-2">
+              <Form.Label>To</Form.Label>
+              <Form.Control value={replyTo} onChange={(e) => setReplyTo(e.target.value)} readOnly />
+            </Form.Group>
+            <Form.Group className="mb-2">
+              <Form.Label>Subject</Form.Label>
+              <Form.Control value={replySubject} onChange={(e) => setReplySubject(e.target.value)} readOnly />
+            </Form.Group>
+            <Form.Group className="mb-2">
+              <Form.Label>Body</Form.Label>
+              <Form.Control as="textarea" rows={8} value={replyBody} onChange={(e) => setReplyBody(e.target.value)} />
+            </Form.Group>
+            <Form.Group>
+              <Form.Label>Attachments</Form.Label>
+              <Form.Control 
+                type="file" 
+                multiple 
+                onChange={(e: any) => {
+                  const files = Array.from(e.target.files || [])
+                  setReplyAttachments(files as File[])
+                }}
+              />
+              {replyAttachments.length > 0 && (
+                <div className="mt-2">
+                  <small className="text-muted">
+                    {replyAttachments.length} file(s) selected: {replyAttachments.map(f => f.name).join(', ')}
+                  </small>
+                </div>
+              )}
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleCloseReply}>Cancel</Button>
+          <Button variant="primary" onClick={sendReply}>Send Reply</Button>
         </Modal.Footer>
       </Modal>
     </Container>
