@@ -266,3 +266,13 @@
 .email-detail-card .card-subtitle strong {
   color: #000000;
 }
+
+/* Infinite rotation animation for loading icons */
+@keyframes fa-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.fa-spin {
+  animation: fa-spin 1s infinite linear;
+}
