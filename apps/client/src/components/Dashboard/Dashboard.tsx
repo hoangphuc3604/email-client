@@ -26,7 +26,7 @@ import {
   FaEnvelopeOpen,
   FaEnvelope,
   FaFileArchive,
-  FaPencilAlt,
+  FaPen,
   FaDownload,
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
@@ -73,7 +73,8 @@ export default function Dashboard() {
   const [showCompose, setShowCompose] = useState(false)
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
   const [cursorIndex, setCursorIndex] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const [loadingMailboxes, setLoadingMailboxes] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -122,6 +123,7 @@ export default function Dashboard() {
     setMobileView('list')
     
     // If folder needs reload or hasn't been loaded yet, load it
+    // Don't trigger loading state for mailbox list
     if (!loadedFolders.has(id) || foldersNeedReload.has(id)) {
       loadFolderData(id, true)
     }
@@ -238,7 +240,7 @@ export default function Dashboard() {
   }
 
   async function loadMailboxes() {
-    setLoading(true)
+    setLoadingMailboxes(true)
     try {
       const data = await mailApi.listMailboxes()
       // Filter to only show essential system labels (Gmail standard labels)
@@ -251,6 +253,7 @@ export default function Dashboard() {
         unreadCount: box.unread_count || 0
       }))
       setMailboxes(filtered.length > 0 ? filtered : [])
+      setLoadingMailboxes(false)
       
       // Only load Inbox on initial load for performance
       const inboxId = 'inbox'
@@ -258,7 +261,7 @@ export default function Dashboard() {
     } catch (e) {
       console.error('Error loading mailboxes:', e)
       setMailboxes([])
-      setLoading(false)
+      setLoadingMailboxes(false)
     }
   }
 
@@ -595,19 +598,8 @@ export default function Dashboard() {
       [selectedFolder]: null
     }))
     
-    // Load fresh data
+    // Load fresh data - only refresh email list, not mailbox list
     await loadFolderData(selectedFolder, true)
-    
-    // Mark all other folders as needing reload
-    setFoldersNeedReload(() => {
-      const updated = new Set<string>()
-      mailboxes.forEach((folder) => {
-        if (folder.id !== selectedFolder) {
-          updated.add(folder.id)
-        }
-      })
-      return updated
-    })
   }
 
   const [composeTo, setComposeTo] = useState('')
@@ -843,7 +835,7 @@ export default function Dashboard() {
             </div>
 
             <ListGroup variant="flush" className="folders-list">
-              {loading ? (
+              {loadingMailboxes ? (
                 <div className="text-center p-3">
                   <FaSync className="fa-spin" /> Loading...
                 </div>
@@ -855,7 +847,7 @@ export default function Dashboard() {
                         {String(f.id).toLowerCase() === 'inbox' && <FaInbox className="me-2" />}
                         {String(f.id).toLowerCase() === 'starred' && <FaStar className="me-2" />}
                         {String(f.id).toLowerCase() === 'sent' && <FaPaperPlane className="me-2" />}
-                        {String(f.id).toLowerCase() === 'drafts' && <FaPencilAlt className="me-2" />}
+                        {String(f.id).toLowerCase() === 'draft' && <FaPen className="me-2" />}
                         {String(f.id).toLowerCase() === 'archive' && <FaFileArchive className="me-2" />}
                         {String(f.id).toLowerCase() === 'trash' && <FaTrash className="me-2" />}
                         {f.name}
