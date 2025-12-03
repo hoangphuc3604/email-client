@@ -13,15 +13,31 @@ export const api = axios.create({
   withCredentials: true,
 })
 
-// If an access token was stored from a previous session, set it on the client
-try {
-  const stored = localStorage.getItem('access_token')
-  if (stored) {
-    api.defaults.headers.common['Authorization'] = `Bearer ${stored}`
+// Set access token from Zustand store if available (in-memory only)
+// This runs once when the module loads, but token will be set properly during auth flow
+const initToken = () => {
+  try {
+    const token = useAuthStore.getState().accessToken
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+    }
+  } catch (e) {
+    // ignore if store is not available
   }
-} catch (e) {
-  // ignore if localStorage is not available
 }
+initToken()
+
+// Interceptor to add access token from Zustand store to each request
+api.interceptors.request.use(
+  (config) => {
+    const token = useAuthStore.getState().accessToken
+    if (token && config.headers) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
 
 // A separate client used for refresh calls to avoid interceptor loops
 const refreshClient = axios.create({
@@ -60,19 +76,26 @@ export async function refreshToken(): Promise<string> {
 
   try {
     const refreshRes = await refreshClient.post('/auth/refresh')
-    const accessToken = refreshRes?.data?.data?.access_token || refreshRes?.data?.access_token
-    if (accessToken) {
+    // Backend returns camelCase (accessToken) due to CamelModel, but also check snake_case for compatibility
+    const accessToken = refreshRes?.data?.data?.accessToken || 
+                        refreshRes?.data?.data?.access_token || 
+                        refreshRes?.data?.accessToken ||
+                        refreshRes?.data?.access_token
+    
+    if (accessToken && typeof accessToken === 'string' && accessToken.length > 0) {
+      // Store access token in Zustand store (in-memory only)
+      useAuthStore.getState().setAccessToken(accessToken)
       api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-      try {
-        localStorage.setItem('access_token', accessToken)
-      } catch (e) {}
+      processQueue(null, accessToken)
+      isRefreshing = false
+      return accessToken
+    } else {
+      throw new Error('No valid access token received from refresh endpoint')
     }
-    processQueue(null, accessToken)
-    isRefreshing = false
-    return accessToken
   } catch (refreshError) {
+    // Clear access token from Zustand store
     try {
-      localStorage.removeItem('access_token')
+      useAuthStore.getState().clearAccessToken()
     } catch (e) {}
     try {
       localStorage.removeItem('email_previews_map')

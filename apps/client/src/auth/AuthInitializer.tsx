@@ -28,27 +28,8 @@ export default function AuthInitializer() {
   const qc = useQueryClient()
 
   useEffect(() => {
-    // If an access token is present in localStorage, apply it immediately so
-    // routes don't redirect before initAuth validates it. This is optimistic;
-    // initAuth will still verify the token with the server.
-    try {
-      const token = localStorage.getItem('access_token')
-      if (token) {
-        api.defaults.headers.common['Authorization'] = `Bearer ${token}`
-        const payload = decodeJwt(token)
-        if (payload) {
-          const setUser = useAuthStore.getState().setUser
-          const user = {
-            id: payload.sub || payload.user_id || '',
-            email: payload.email || payload.sub || '',
-            name: payload.name || payload.email || '',
-          }
-          try { setUser(user) } catch (e) {}
-        }
-      }
-    } catch (e) {}
-
     // Validate / refresh as normal
+    // Access token will be stored in Zustand store (in-memory) after successful refresh
     initAuth(qc)
   }, [])
 

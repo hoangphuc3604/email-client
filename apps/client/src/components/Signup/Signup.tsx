@@ -39,11 +39,11 @@ function Signup() {
     if (mutation.isSuccess) {
       // Clear any auto-saved access token from the register handler so
       // we go to the login page and require an explicit sign-in.
-      try {
-        localStorage.removeItem('access_token')
-      } catch (e) {}
       try { delete (window as any).api?.defaults?.headers?.common['Authorization'] } catch (e) {}
-      try { useAuthStore.getState().clearUser() } catch (e) {}
+      try { 
+        useAuthStore.getState().clearUser()
+        useAuthStore.getState().clearAccessToken()
+      } catch (e) {}
       navigate('/login')
     }
   }, [mutation.isSuccess])

@@ -23,14 +23,15 @@ function extractAccessToken(resp: any): string | null {
 export function useRegister() {
   const qc = useQueryClient()
   const setUser = useAuthStore((s) => s.setUser)
+  const setAccessToken = useAuthStore((s) => s.setAccessToken)
 
   return useMutation((payload: any) => authApi.register(payload), {
     onSuccess(data) {
       const user = data?.data?.user || data?.user || null
       const accessToken = extractAccessToken(data)
       if (accessToken) {
+        setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -41,14 +42,15 @@ export function useRegister() {
 export function useLogin() {
   const qc = useQueryClient()
   const setUser = useAuthStore((s) => s.setUser)
+  const setAccessToken = useAuthStore((s) => s.setAccessToken)
 
   return useMutation((payload: any) => authApi.login(payload), {
     onSuccess(data) {
       const user = data?.data?.user || data?.user || null
       const accessToken = extractAccessToken(data)
       if (accessToken) {
+        setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -59,14 +61,15 @@ export function useLogin() {
 export function useGoogleLogin() {
   const qc = useQueryClient()
   const setUser = useAuthStore((s) => s.setUser)
+  const setAccessToken = useAuthStore((s) => s.setAccessToken)
 
   return useMutation((credential: string) => authApi.google({ credential }), {
     onSuccess(data) {
       const user = data?.data?.user || data?.user || null
       const accessToken = extractAccessToken(data)
       if (accessToken) {
+        setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -77,14 +80,15 @@ export function useGoogleLogin() {
 export function useGoogleCodeLogin() {
   const qc = useQueryClient()
   const setUser = useAuthStore((s) => s.setUser)
+  const setAccessToken = useAuthStore((s) => s.setAccessToken)
 
   return useMutation((code: string) => authApi.google({ code }), {
     onSuccess(data) {
       const user = data?.data?.user || data?.user || null
       const accessToken = extractAccessToken(data)
       if (accessToken) {
+        setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
-        try { localStorage.setItem('access_token', accessToken) } catch (e) {}
       }
       setUser(user)
       qc.invalidateQueries(['me'])
@@ -95,17 +99,14 @@ export function useGoogleCodeLogin() {
 export function useLogout() {
   const qc = useQueryClient()
   const clearUser = useAuthStore((s) => s.clearUser)
+  const clearAccessToken = useAuthStore((s) => s.clearAccessToken)
 
   return useMutation(() => authApi.logout(), {
     onSuccess() {
       clearUser()
+      clearAccessToken()
       qc.removeQueries(['me'])
       delete api.defaults.headers.common['Authorization']
-      try {
-        localStorage.removeItem('access_token')
-      } catch (e) {
-        // ignore
-      }
     },
   })
 }
@@ -123,58 +124,51 @@ export function useMe() {
 // Initialize auth on app start: try refresh -> set access token -> fetch user
 export async function initAuth(queryClient: any) {
   const setInitializing = useAuthStore.getState().setInitializing
+  const setAccessToken = useAuthStore.getState().setAccessToken
   setInitializing(true)
   try {
-    // 1) Prefer stored access token for faster return-to-site behavior
-    const stored = (() => {
-      try {
-        return localStorage.getItem('access_token')
-      } catch (e) {
-        return null
-      }
-    })()
-
-    console.debug('initAuth: stored token present?', !!stored)
-
-    if (stored) {
-      // try using stored token first even if our local expiry check disagrees
-      api.defaults.headers.common['Authorization'] = `Bearer ${stored}`
-      try {
-        const meRes = await authApi.me()
-        const user = meRes?.data?.user ?? meRes?.data ?? meRes?.user ?? meRes ?? null
-        useAuthStore.getState().setUser(user)
-        queryClient.invalidateQueries(['me'])
-        return
-      } catch (meErr) {
-        // stored token didn't work (maybe expired or invalid) -- fall through to server refresh
-      }
-    }
-
-    // 2) Try server-side refresh (cookie-based) as a fallback
+    // Try server-side refresh (cookie-based) to get access token
     try {
       console.debug('initAuth: attempting server refresh')
       const refreshRes = await authApi.refresh()
-      const accessToken = /*refreshRes?.data?.data?.access_token || */refreshRes?.data?.access_token
-      if (accessToken) {
+      // Backend returns camelCase (accessToken) due to CamelModel, but also check snake_case for compatibility
+      const accessToken = refreshRes?.data?.data?.accessToken || 
+                          refreshRes?.data?.data?.access_token || 
+                          refreshRes?.data?.accessToken ||
+                          refreshRes?.data?.access_token
+      
+      if (accessToken && typeof accessToken === 'string' && accessToken.length > 0) {
+        setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
+        
+        // Now call me() with the valid token
         try {
-          localStorage.setItem('access_token', accessToken)
-        } catch (e) {}
+          const meRes = await authApi.me()
+          const user = meRes?.data?.user ?? meRes?.data ?? meRes?.user ?? meRes ?? null
+          if (user) {
+            useAuthStore.getState().setUser(user)
+            queryClient.invalidateQueries(['me'])
+            return
+          } else {
+            console.debug('initAuth: me() returned no user')
+          }
+        } catch (meErr) {
+          console.debug('initAuth: me() failed after refresh', meErr)
+          // If me() fails, token might be invalid, clear it
+          setAccessToken(null)
+          delete api.defaults.headers.common['Authorization']
+        }
+      } else {
+        console.debug('initAuth: no valid access token received from refresh')
       }
-      const meRes2 = await authApi.me()
-      const user2 = meRes2?.data?.user ?? meRes2?.data ?? meRes2?.user ?? meRes2 ?? null
-      useAuthStore.getState().setUser(user2)
-      queryClient.invalidateQueries(['me'])
-      return
     } catch (refreshErr) {
       console.debug('initAuth: refresh failed', refreshErr)
     }
 
-    // nothing worked
+    // nothing worked - clear state
     useAuthStore.getState().clearUser()
-    try {
-      localStorage.removeItem('access_token')
-    } catch (e) {}
+    useAuthStore.getState().clearAccessToken()
+    delete api.defaults.headers.common['Authorization']
   } finally {
     setInitializing(false)
   }

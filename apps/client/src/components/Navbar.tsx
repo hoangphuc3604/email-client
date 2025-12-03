@@ -43,9 +43,6 @@ function NavBar() {
 
     // Ensure client-side tokens/state cleared and redirect to login
     try {
-      localStorage.removeItem('access_token')
-    } catch (e) {}
-    try {
       localStorage.removeItem('email_previews_map')
     } catch (e) {}
     try {
@@ -53,6 +50,7 @@ function NavBar() {
     } catch (e) {}
     try {
       useAuthStore.getState().clearUser()
+      useAuthStore.getState().clearAccessToken()
     } catch (e) {}
 
     navigate('/login')
