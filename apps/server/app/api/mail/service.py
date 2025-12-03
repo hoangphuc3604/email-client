@@ -99,8 +99,15 @@ class MailService:
       def get_header(name):
         return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
 
+      def get_header_list(name):
+        raw_value = get_header(name)
+        if not raw_value:
+          return []
+        return [{"name": n, "email": e} for n, e in email.utils.getaddresses([raw_value])]
+
       subject = get_header('Subject') or '(No Subject)'
       from_header = get_header('From')
+      to_list = get_header_list('To')
 
       name, email_addr = email.utils.parseaddr(from_header)
       sender_obj = {"name": name, "email": email_addr}
@@ -118,6 +125,7 @@ class MailService:
         "history_id": msg_data.get('historyId'),
         "subject": subject,
         "sender": sender_obj,
+        "to": to_list,
         "received_on": received_on,
         "unread": "UNREAD" in msg_data.get('labelIds', []),
         "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
