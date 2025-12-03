@@ -132,10 +132,7 @@ export async function initAuth(queryClient: any) {
       console.debug('initAuth: attempting server refresh')
       const refreshRes = await authApi.refresh()
       // Backend returns camelCase (accessToken) due to CamelModel, but also check snake_case for compatibility
-      const accessToken = refreshRes?.data?.data?.accessToken || 
-                          refreshRes?.data?.data?.access_token || 
-                          refreshRes?.data?.accessToken ||
-                          refreshRes?.data?.access_token
+      const accessToken = refreshRes?.data.access_token
       
       if (accessToken && typeof accessToken === 'string' && accessToken.length > 0) {
         setAccessToken(accessToken)
