@@ -68,17 +68,68 @@ class MailService:
     ]
 
   async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50):
+    """
+    Lấy danh sách email từ Gmail dựa trên mailbox_id (nhãn).
+    Hàm này tự động phân giải tên nhãn (ví dụ: 'todo') sang Gmail Label ID thực tế (ví dụ: 'Label_234').
+    """
     service = await self.get_gmail_service(user_id)
     
-    # Gmail API requires uppercase label IDs
-    gmail_label = mailbox_id.upper()
+    # 1. Map các nhãn hệ thống của Gmail (Frontend dùng số nhiều/chữ thường -> Gmail dùng ID chuẩn)
+    system_labels_map = {
+        'inbox': 'INBOX',
+        'sent': 'SENT',
+        'trash': 'TRASH',
+        'drafts': 'DRAFT',  # Gmail dùng 'DRAFT' số ít
+        'spam': 'SPAM',
+        'starred': 'STARRED',
+        'important': 'IMPORTANT'
+    }
 
-    results = service.users().messages().list(
-      userId='me',
-      labelIds=[gmail_label],
-      maxResults=limit,
-      pageToken=page_token
-    ).execute()
+    # Lấy ID nếu là nhãn hệ thống
+    gmail_label_id = system_labels_map.get(mailbox_id.lower())
+
+    # 2. Nếu không phải nhãn hệ thống, tìm ID trong danh sách nhãn của người dùng
+    if not gmail_label_id:
+        try:
+            # Lấy danh sách tất cả nhãn hiện có trên Gmail của user
+            results = service.users().labels().list(userId='me').execute()
+            labels = results.get('labels', [])
+            
+            # Chuẩn hóa tên cần tìm: 'todo' -> 'to do' để khớp với Gmail nếu user đặt tên có dấu cách
+            search_name = mailbox_id.lower()
+            if search_name == 'todo':
+                search_name = 'to do'
+            
+            # Tìm nhãn có tên khớp
+            for label in labels:
+                if label['name'].lower() == search_name:
+                    gmail_label_id = label['id']
+                    break
+            
+            # Nếu vẫn không tìm thấy (nhãn chưa được tạo trên Gmail), trả về danh sách rỗng
+            if not gmail_label_id:
+                print(f"Label '{mailbox_id}' not found in Gmail account.")
+                return {
+                    "threads": [],
+                    "next_page_token": None,
+                    "result_size_estimate": 0
+                }
+        except Exception as e:
+            print(f"Error resolving label ID: {e}")
+            return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
+
+    # 3. Gọi Gmail API để lấy danh sách tin nhắn với Label ID chính xác
+    try:
+        results = service.users().messages().list(
+          userId='me',
+          labelIds=[gmail_label_id],
+          maxResults=limit,
+          pageToken=page_token
+        ).execute()
+    except Exception as e:
+        print(f"Error fetching messages from Gmail: {e}")
+        # Trả về rỗng nếu lỗi API (ví dụ 404 Label not found dù đã cố tìm)
+        return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
 
     messages = results.get('messages', [])
     next_page_token = results.get('nextPageToken', None)
@@ -86,51 +137,58 @@ class MailService:
 
     thread_list = []
 
+    # 4. Lấy chi tiết từng tin nhắn
     for msg in messages:
-      msg_data = service.users().messages().get(
-        userId='me',
-        id=msg['id'],
-        format='metadata'
-      ).execute()
+      try:
+          msg_data = service.users().messages().get(
+            userId='me',
+            id=msg['id'],
+            format='metadata' # Chỉ lấy metadata (headers) để tối ưu tốc độ
+          ).execute()
 
-      payload = msg_data.get('payload', {})
-      headers = payload.get('headers', [])
+          payload = msg_data.get('payload', {})
+          headers = payload.get('headers', [])
 
-      def get_header(name):
-        return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
+          # Hàm helper lấy header an toàn
+          def get_header(name):
+            return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
 
-      def get_header_list(name):
-        raw_value = get_header(name)
-        if not raw_value:
-          return []
-        return [{"name": n, "email": e} for n, e in email.utils.getaddresses([raw_value])]
+          # Parse người gửi
+          from_header = get_header('From')
+          if from_header:
+              name, email_addr = email.utils.parseaddr(from_header)
+              sender_obj = {"name": name, "email": email_addr}
+          else:
+              sender_obj = {"name": "Unknown", "email": ""}
 
-      subject = get_header('Subject') or '(No Subject)'
-      from_header = get_header('From')
-      to_list = get_header_list('To')
+          # Parse người nhận (To)
+          to_header = get_header('To')
+          to_list = []
+          if to_header:
+              to_list = [{"name": n, "email": e} for n, e in email.utils.getaddresses([to_header])]
 
-      name, email_addr = email.utils.parseaddr(from_header)
-      sender_obj = {"name": name, "email": email_addr}
+          subject = get_header('Subject') or '(No Subject)'
+          
+          internal_date = msg_data.get('internalDate')
+          received_on = datetime.fromtimestamp(int(internal_date)/1000).isoformat() if internal_date else ""
 
-      internal_date = msg_data.get('internalDate')
-      received_on = datetime.fromtimestamp(int(internal_date)/1000).isoformat() if internal_date else ""
-
-      # Use threadId if available, otherwise message id
-      thread_id = msg_data.get('threadId', msg['id'])
-
-      thread_list.append({
-        "id": msg['id'], # Keep message ID for now as per existing logic, or switch to thread_id? 
-                         # The prompt implies we need to support /emails/:id. 
-                         # If we return msg['id'], :id will be message id.
-        "history_id": msg_data.get('historyId'),
-        "subject": subject,
-        "sender": sender_obj,
-        "to": to_list,
-        "received_on": received_on,
-        "unread": "UNREAD" in msg_data.get('labelIds', []),
-        "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
-        "body": msg_data.get('snippet', '')
-      })
+          # Mapping dữ liệu trả về cho Frontend
+          thread_list.append({
+            "id": msg['id'],
+            "history_id": msg_data.get('historyId'),
+            "subject": subject,
+            "sender": sender_obj,
+            "to": to_list,
+            "received_on": received_on,
+            "unread": "UNREAD" in msg_data.get('labelIds', []),
+            # Trả về danh sách tags/labels để frontend hiển thị (nếu cần)
+            "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
+            "body": msg_data.get('snippet', '') # Snippet là bản tóm tắt ngắn của body
+          })
+      except Exception as e:
+          # Log lỗi nhưng không làm chết cả danh sách nếu 1 email lỗi
+          print(f"Error processing message {msg.get('id')}: {e}")
+          continue
 
     return {
       "threads": thread_list,
