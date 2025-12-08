@@ -76,6 +76,22 @@ MOCK_MAILBOXES: List[Dict[str, Any]] = [
         "unread_count": 1,
         "total_count": 45,
         "custom": True
+    },
+    {
+        "id": "todo",
+        "name": "To Do",
+        "icon": "task", # Icon identifier
+        "unread_count": 1,
+        "total_count": 5,
+        "custom": True
+    },
+    {
+        "id": "done",
+        "name": "Done",
+        "icon": "check",
+        "unread_count": 0,
+        "total_count": 10,
+        "custom": True
     }
 ]
 
@@ -311,6 +327,15 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
 # Thread list items for mailbox views (lightweight representation)
 # This is what gets returned by GET /mailboxes/:id/emails
 MOCK_THREAD_LIST: Dict[str, List[Dict[str, Any]]] = {
+    "inbox": [
+        {"id": "thread_001", "history_id": "12345"},
+        {"id": "thread_002", "history_id": "12346"},
+    ],
+    # Thêm dữ liệu mẫu cho To Do
+    "todo": [
+        {"id": "thread_003", "history_id": "12347"}, 
+    ],
+    "done": [],
     "inbox": [
         {"id": "thread_001", "history_id": "12345"},
         {"id": "thread_002", "history_id": "12346"},

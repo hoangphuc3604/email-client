@@ -31,6 +31,8 @@ import {
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
+import { BsKanban, BsListUl } from 'react-icons/bs'; // Import icon
+import KanbanBoard from './KanbanBoard'; // Import component mới
 
 // Map Gmail label IDs to friendly names
 const LABEL_NAME_MAP: Record<string, string> = {
@@ -56,6 +58,7 @@ export default function Dashboard() {
   const [selectedFolder, setSelectedFolder] = useState('inbox')
   const [selectedEmail, setSelectedEmail] = useState<any | null>(null)
   const [mailboxes, setMailboxes] = useState<any[]>([])
+  const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [previewsMap, setPreviewsMap] = useState<Record<string, any[]>>(() => {
     // Load from localStorage on mount
     try {
@@ -861,9 +864,30 @@ export default function Dashboard() {
               )}
             </ListGroup>
           </Col>
-
+              {/* Logic Render Dashboard */}
+          {viewMode === 'kanban' ? (
+            // Hiển thị chế độ Kanban (chiếm toàn bộ chiều rộng còn lại 10/12 cột vì cột Folder là 2)
+            <Col md={10} className="h-100">
+              <KanbanBoard onOpenEmail={(email) => {
+                  openEmail(email); // Hàm mở chi tiết email có sẵn trong Dashboard
+                  // Optional: Chuyển về list view hoặc mở modal chi tiết
+              }} />
+            </Col>
+          ) : (
+            // Hiển thị chế độ List truyền thống (Giữ nguyên code cũ của bạn)
+            <>
           <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
             <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
+              {/* Nút chuyển đổi View Mode */}
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Switch View</Tooltip>}>
+                <Button 
+                  variant="outline-info" 
+                  className="me-2"
+                  onClick={() => setViewMode(viewMode === 'list' ? 'kanban' : 'list')}
+                >
+                  {viewMode === 'list' ? <BsKanban /> : <BsListUl />}
+                </Button>
+              </OverlayTrigger>
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Compose</Tooltip>}>
                 <Button variant="primary" onClick={() => setShowCompose(true)} aria-label="Compose">
                   <BiEdit />
@@ -1094,6 +1118,8 @@ export default function Dashboard() {
               </Card>
             )}
           </Col>
+          </>
+          )}
         </Row>
       </Container>
 
