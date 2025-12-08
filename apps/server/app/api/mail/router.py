@@ -6,6 +6,7 @@ from app.api.auth.dependencies import get_current_user
 from app.api.auth.models import UserInfo
 from app.api.mail.service import MailService
 from app.api.mail.dependencies import get_mail_service
+from app.api.mail.models import SnoozeEmailRequest
 
 logger = logging.getLogger(__name__)
 from app.api.mail.models import (
@@ -310,3 +311,18 @@ async def get_attachment(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to download attachment: {str(e)}")
+
+
+@router.post("/emails/{email_id}/snooze", response_model=APIResponse[dict])
+async def snooze_email_endpoint(
+    email_id: str,
+    payload: SnoozeEmailRequest,
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Snooze an email until a specific time."""
+    try:
+        result = await mail_service.snooze_email(current_user.id, email_id, payload.snooze_until)
+        return APIResponse(data=result, message="Email snoozed successfully")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

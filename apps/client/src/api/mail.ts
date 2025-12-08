@@ -146,6 +146,15 @@ const mailApi = {
     })
     return res.data?.data || res.data
   },
+
+
+  async snoozeEmail(emailId: string, snoozeUntil: string) {
+    // snoozeUntil phải là ISO string
+    const res = await api.post(`${BASE_ENDPOINT}/emails/${emailId}/snooze`, {
+      snooze_until: snoozeUntil
+    })
+    return res.data?.data || res.data
+  },
 }
 
 export { mailApi }

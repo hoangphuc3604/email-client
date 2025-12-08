@@ -13,6 +13,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import mimetypes
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 from app.api.mail.models import (
@@ -32,7 +33,7 @@ class MailService:
   def __init__(self, db: Database):
     self.db = db
     self.users_collection = self.db["users"]
-
+    self.snoozed_collection = self.db["snoozed_emails"] # Collection mới để lưu trạng thái snooze
   async def get_gmail_service(self, user_id: str):
     user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
     if not user or "google_refresh_token" not in user:
@@ -808,3 +809,68 @@ class MailService:
           print(f"Error getting/creating label {label_name}: {str(e)}")
           # Fallback: Trả về nguyên gốc nếu lỗi (có thể gây lỗi 400 nhưng tốt hơn là crash)
           return label_name
+
+  async def snooze_email(self, user_id: str, email_id: str, snooze_until: datetime):
+        service = await self.get_gmail_service(user_id)
+        
+        # 1. Tạo nhãn SNOOZED trên Gmail nếu chưa có
+        snooze_label_id = await self._get_or_create_label_id(service, user_id, "SNOOZED")
+        
+        # 2. Xóa khỏi INBOX, thêm vào SNOOZED
+        body = {
+            'addLabelIds': [snooze_label_id],
+            'removeLabelIds': ['INBOX']
+        }
+        try:
+            service.users().messages().modify(userId='me', id=email_id, body=body).execute()
+        except Exception as e:
+            raise ValueError(f"Gmail API Error: {e}")
+
+        # 3. Lưu vào MongoDB để worker theo dõi
+        await self.snoozed_collection.update_one(
+            {"email_id": email_id},
+            {"$set": {
+                "user_id": user_id,
+                "email_id": email_id,
+                "snooze_until": snooze_until,
+                "status": "active",
+                "created_at": datetime.utcnow()
+            }},
+            upsert=True
+        )
+        
+        return {"message": f"Email snoozed until {snooze_until}"}
+
+    # Hàm được gọi bởi Scheduler
+  async def check_and_restore_snoozed_emails(self):
+        now = datetime.utcnow()
+        # Tìm các email đã hết hạn snooze và đang active
+        cursor = self.snoozed_collection.find({
+            "snooze_until": {"$lte": now},
+            "status": "active"
+        })
+
+        async for record in cursor:
+            user_id = record["user_id"]
+            email_id = record["email_id"]
+            try:
+                print(f"[SNOOZE WORKER] Restoring email {email_id} for user {user_id}")
+                service = await self.get_gmail_service(user_id)
+                
+                # Lấy ID thực tế của nhãn SNOOZED
+                snooze_label_id = await self._get_or_create_label_id(service, user_id, "SNOOZED")
+
+                # Khôi phục: Thêm INBOX, Xóa SNOOZED
+                body = {
+                    'addLabelIds': ['INBOX'],
+                    'removeLabelIds': [snooze_label_id]
+                }
+                service.users().messages().modify(userId='me', id=email_id, body=body).execute()
+
+                # Đánh dấu đã hoàn thành trong DB
+                await self.snoozed_collection.update_one(
+                    {"_id": record["_id"]},
+                    {"$set": {"status": "processed", "restored_at": now}}
+                )
+            except Exception as e:
+                print(f"[SNOOZE WORKER] Error restoring email {email_id}: {e}")

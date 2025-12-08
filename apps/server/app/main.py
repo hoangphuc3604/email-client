@@ -10,6 +10,11 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.router import router as api_router
 from app.config import Settings
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from app.database import get_db
+from app.config import settings # Để lấy connection string tạo client riêng cho worker
+from app.api.mail.service import MailService
+from pymongo import AsyncMongoClient
 
 settings = Settings()  # type: ignore
 
@@ -109,3 +114,24 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
+# Khởi tạo Scheduler
+scheduler = AsyncIOScheduler()
+
+async def run_snooze_job():
+    # Cần tạo instance DB riêng cho job vì dependency injection không hoạt động trong background job
+    client = AsyncMongoClient(settings.DB_CONNECTION_STRING)
+    db = client[settings.DB_NAME]
+    mail_service = MailService(db)
+    await mail_service.check_and_restore_snoozed_emails()
+    # client.close() # Có thể giữ connection hoặc close tùy strategy
+
+@app.on_event("startup")
+async def app_startup():
+    # Chạy job mỗi 1 phút
+    scheduler.add_job(run_snooze_job, "interval", minutes=1)
+    scheduler.start()
+    print("Scheduler started for Snooze jobs.")
+
+@app.on_event("shutdown")
+async def app_shutdown():
+    scheduler.shutdown()

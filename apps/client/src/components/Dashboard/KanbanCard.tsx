@@ -1,17 +1,18 @@
 // apps/client/src/components/Dashboard/KanbanCard.tsx
 import { Card, Badge } from 'react-bootstrap';
-import { FaStar, FaRegStar } from 'react-icons/fa';
+import { FaStar, FaRegStar, FaClock } from 'react-icons/fa'; // Gộp import icon cho gọn
 
 interface KanbanCardProps {
   email: any;
   onClick: (email: any) => void;
+  onSnooze?: (emailId: string) => void; // Optional để tránh lỗi code cũ
 }
 
-export default function KanbanCard({ email, onClick }: KanbanCardProps) {
+export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps) {
   const sender = typeof email.sender === 'string' ? email.sender : (email.sender?.name || email.sender?.email || 'Unknown');
   const isStarred = (email.labels || []).includes('starred') || (email.tags || []).some((t: any) => t.id === 'starred');
 
-  // Giả lập hiển thị AI Summary nếu có (theo yêu cầu W2)
+  // Giả lập hiển thị AI Summary nếu có
   const summary = email.ai_summary || email.body?.substring(0, 100) || email.preview || "";
 
   return (
@@ -26,22 +27,45 @@ export default function KanbanCard({ email, onClick }: KanbanCardProps) {
       onClick={() => onClick(email)}
     >
       <Card.Body className="p-3">
+        {/* Header: Sender + Icons */}
         <div className="d-flex justify-content-between mb-2">
-          <small className="text-info" style={{ fontSize: '0.8rem' }}>
+          <small className="text-info" style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>
             {sender}
           </small>
-          {isStarred ? <FaStar className="text-warning" /> : <FaRegStar className="text-info" />}
-        </div>
+          
+          {/* Khu vực Action Icons: Snooze & Star */}
+          <div onClick={(e) => e.stopPropagation()} className="d-flex align-items-center gap-2"> 
+              {/* Nút Snooze */}
+              {onSnooze && (
+                <FaClock 
+                  className="text-secondary hover-icon" 
+                  style={{cursor: 'pointer'}} 
+                  title="Snooze"
+                  onClick={() => onSnooze(email.id)}
+                />
+              )}
+              
+              {/* Nút Star */}
+              {isStarred ? (
+                <FaStar className="text-warning" style={{cursor: 'pointer'}} /> 
+              ) : (
+                <FaRegStar className="text-secondary" style={{cursor: 'pointer'}} />
+              )}
+          </div>
+        </div> 
+        {/* */}
         
+        {/* Subject */}
         <h6 className="mb-2" style={{ fontWeight: email.unread ? 'bold' : 'normal', color: '#fff' }}>
           {email.subject}
         </h6>
         
-        <Card.Text style={{ fontSize: '0.85rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', color: '#c770f0' }}>
-          {/* Đây là nơi sẽ hiển thị AI Summary sau này */}
+        {/* Summary */}
+        <Card.Text style={{ fontSize: '0.85rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', color: '#b8b8b8' }}>
           {summary}...
         </Card.Text>
 
+        {/* Badge */}
         {email.unread && <Badge bg="primary">New</Badge>}
       </Card.Body>
     </Card>

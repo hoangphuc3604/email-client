@@ -1,9 +1,9 @@
 // apps/client/src/components/Dashboard/KanbanBoard.tsx
 import { useState, useEffect } from 'react';
-import { Row, Col, Spinner } from 'react-bootstrap';
+import { Row, Col, Spinner, Modal, Form, Button } from 'react-bootstrap'; // Gộp import
 import KanbanCard from './KanbanCard';
 import mailApi from '../../api/mail';
-// Sửa dòng này: thêm 'type' trước DropResult
+import { FaClock } from 'react-icons/fa';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 
 interface KanbanBoardProps {
@@ -19,6 +19,11 @@ const COLUMNS = [
 export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
   const [columnsData, setColumnsData] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
+  
+  // State cho Snooze Modal
+  const [showSnoozeModal, setShowSnoozeModal] = useState(false);
+  const [snoozeTargetEmail, setSnoozeTargetEmail] = useState<string | null>(null);
+  const [snoozeDate, setSnoozeDate] = useState("");
 
   useEffect(() => {
     fetchAllColumns();
@@ -46,11 +51,46 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     }
   };
 
-  // Hàm xử lý khi kết thúc kéo thả
+  // Hàm mở modal snooze
+  const handleOpenSnooze = (emailId: string) => {
+    setSnoozeTargetEmail(emailId);
+    // Mặc định snooze đến ngày mai 9h sáng
+    const tmr = new Date();
+    tmr.setDate(tmr.getDate() + 1);
+    tmr.setHours(9, 0, 0, 0);
+    // Format YYYY-MM-DDTHH:mm cho input datetime-local
+    // Lưu ý: toISOString() trả về UTC, cần chỉnh lại nếu muốn hiển thị giờ địa phương chính xác trên input
+    // Cách đơn giản nhất để lấy format local cho input:
+    const localIsoString = new Date(tmr.getTime() - (tmr.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+    setSnoozeDate(localIsoString); 
+    setShowSnoozeModal(true);
+  };
+
+  const handleConfirmSnooze = async () => {
+    if (!snoozeTargetEmail || !snoozeDate) return;
+
+    try {
+      // Gọi API Snooze
+      await mailApi.snoozeEmail(snoozeTargetEmail, new Date(snoozeDate).toISOString());
+      
+      // Update UI (Optimistic): Xóa card khỏi board hiện tại
+      const newColumnsData = { ...columnsData };
+      Object.keys(newColumnsData).forEach(colId => {
+        newColumnsData[colId] = newColumnsData[colId].filter(e => e.id !== snoozeTargetEmail);
+      });
+      setColumnsData(newColumnsData);
+      
+      setShowSnoozeModal(false);
+      // alert("Email snoozed successfully!"); // Có thể bỏ alert cho mượt
+    } catch (e) {
+      console.error("Snooze failed", e);
+      alert("Failed to snooze email.");
+    }
+  };
+
   const onDragEnd = async (result: DropResult) => {
     const { source, destination, draggableId } = result;
 
-    // 1. Kiểm tra nếu thả ra ngoài vùng cho phép hoặc thả lại vị trí cũ
     if (!destination) return;
     if (
       source.droppableId === destination.droppableId &&
@@ -59,47 +99,32 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
       return;
     }
 
-    // 2. Cập nhật UI ngay lập tức (Optimistic Update)
     const sourceColId = source.droppableId;
     const destColId = destination.droppableId;
 
-    // Sao chép dữ liệu hiện tại để thao tác
     const newColumnsData = { ...columnsData };
-    
-    // Lấy card đang được kéo
     const draggedItem = newColumnsData[sourceColId][source.index];
 
-    // Xóa khỏi cột cũ
     newColumnsData[sourceColId].splice(source.index, 1);
     
-    // Thêm vào cột mới
-    // Nếu di chuyển trong cùng một cột
     if (sourceColId === destColId) {
       newColumnsData[sourceColId].splice(destination.index, 0, draggedItem);
     } else {
-      // Nếu di chuyển sang cột khác
       newColumnsData[destColId].splice(destination.index, 0, draggedItem);
     }
 
-    // Cập nhật state để UI thay đổi ngay
     setColumnsData(newColumnsData);
 
-    // 3. Gọi API để cập nhật Backend (nếu chuyển cột khác)
     if (sourceColId !== destColId) {
       try {
         console.log(`Moving email ${draggableId} to ${destColId}`);
-        
-        // Gọi API modifyEmail để thay đổi nhãn (label) của email
-        // Logic ở đây giả định backend sẽ thay thế nhãn cũ bằng nhãn mới
         await mailApi.modifyEmail(draggableId, {
           labels: [destColId] 
         });
-        
       } catch (error) {
         console.error("Failed to update move on backend:", error);
-        // Tùy chọn: Revert lại UI nếu API lỗi (chưa implement để giữ code đơn giản)
         alert("Failed to move card. Please try again.");
-        fetchAllColumns(); // Tải lại dữ liệu gốc
+        fetchAllColumns();
       }
     }
   };
@@ -113,79 +138,118 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
   }
 
   return (
-    // Bọc toàn bộ khu vực kéo thả bằng DragDropContext
-    <DragDropContext onDragEnd={onDragEnd}>
-      <div className="h-100 overflow-auto px-2" style={{ minHeight: '74vh' }}>
-        <Row className="flex-nowrap h-100" style={{ overflowX: 'auto' }}>
-          {COLUMNS.map((col) => (
-            <Col 
-              key={col.id} 
-              md={4} 
-              className="d-flex flex-column"
-              style={{ minWidth: '300px' }}
-            >
-              <div className="p-3 mb-3 text-center rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid #c770f0' }}>
-                <h5 className="m-0 text-white">{col.title}</h5>
-                <small style={{ color: '#0dcaf0', fontWeight: 'bold' }}>
-                  {columnsData[col.id]?.length || 0} cards
-                </small>
-              </div>
-              
-              {/* Định nghĩa vùng thả (Droppable) cho mỗi cột */}
-              <Droppable droppableId={col.id}>
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className="flex-grow-1 px-1 custom-scrollbar"
-                    style={{ 
-                      overflowY: 'auto', 
-                      minHeight: '200px', // Đảm bảo luôn có vùng để thả vào dù cột rỗng
-                      backgroundColor: snapshot.isDraggingOver ? 'rgba(199, 112, 240, 0.1)' : 'transparent',
-                      transition: 'background-color 0.2s ease',
-                      borderRadius: '8px'
-                    }}
-                  >
-                    {columnsData[col.id]?.map((email: any, index: number) => (
-                      // Định nghĩa phần tử kéo (Draggable) cho mỗi card
-                      <Draggable 
-                        key={email.id} 
-                        draggableId={email.id} 
-                        index={index}
-                      >
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
-                            style={{
-                              ...provided.draggableProps.style,
-                              marginBottom: '1rem',
-                              opacity: snapshot.isDragging ? 0.8 : 1,
-                            }}
-                          >
-                            <KanbanCard 
-                              email={email} 
-                              onClick={onOpenEmail}
-                            />
-                          </div>
-                        )}
-                      </Draggable>
-                    ))}
-                    {provided.placeholder}
-                    
-                    {(!columnsData[col.id] || columnsData[col.id].length === 0) && (
-                      <div className="text-center mt-5" style={{ color: '#0dcaf0', opacity: 0.7 }}>
-                        Empty
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Droppable>
-            </Col>
-          ))}
-        </Row>
-      </div>
-    </DragDropContext>
+    <>
+      <DragDropContext onDragEnd={onDragEnd}>
+        <div className="h-100 overflow-auto px-2" style={{ minHeight: '74vh' }}>
+          <Row className="flex-nowrap h-100" style={{ overflowX: 'auto' }}>
+            {COLUMNS.map((col) => (
+              <Col 
+                key={col.id} 
+                md={4} 
+                className="d-flex flex-column"
+                style={{ minWidth: '300px' }}
+              >
+                <div className="p-3 mb-3 text-center rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid #c770f0' }}>
+                  <h5 className="m-0 text-white">{col.title}</h5>
+                  <small style={{ color: '#0dcaf0', fontWeight: 'bold' }}>
+                    {columnsData[col.id]?.length || 0} cards
+                  </small>
+                </div>
+                
+                <Droppable droppableId={col.id}>
+                  {(provided, snapshot) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className="flex-grow-1 px-1 custom-scrollbar"
+                      style={{ 
+                        overflowY: 'auto', 
+                        minHeight: '200px',
+                        backgroundColor: snapshot.isDraggingOver ? 'rgba(199, 112, 240, 0.1)' : 'transparent',
+                        transition: 'background-color 0.2s ease',
+                        borderRadius: '8px'
+                      }}
+                    >
+                      {columnsData[col.id]?.map((email: any, index: number) => (
+                        <Draggable 
+                          key={email.id} 
+                          draggableId={email.id} 
+                          index={index}
+                        >
+                          {(provided, snapshot) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              {...provided.dragHandleProps}
+                              style={{
+                                ...provided.draggableProps.style,
+                                marginBottom: '1rem',
+                                opacity: snapshot.isDragging ? 0.8 : 1,
+                              }}
+                            >
+                              <KanbanCard 
+                                email={email} 
+                                onClick={onOpenEmail}
+                                onSnooze={handleOpenSnooze} /* [SỬA] Đã thêm prop này */
+                              />
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                      
+                      {(!columnsData[col.id] || columnsData[col.id].length === 0) && (
+                        <div className="text-center mt-5" style={{ color: '#0dcaf0', opacity: 0.7 }}>
+                          Empty
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Droppable>
+              </Col>
+            ))}
+          </Row>
+        </div>
+      </DragDropContext>
+
+      {/* Modal Snooze */}
+      <Modal show={showSnoozeModal} onHide={() => setShowSnoozeModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title><FaClock /> Snooze Email</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form.Group>
+            <Form.Label>Snooze until:</Form.Label>
+            <Form.Control 
+              type="datetime-local" 
+              value={snoozeDate}
+              onChange={(e) => setSnoozeDate(e.target.value)}
+            />
+          </Form.Group>
+          <div className="d-flex gap-2 mt-3 justify-content-center">
+             <Button variant="outline-secondary" size="sm" onClick={() => {
+                 const d = new Date(); d.setHours(d.getHours() + 1); 
+                 // Fix múi giờ cho input local
+                 const localIso = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                 setSnoozeDate(localIso);
+             }}>+1 Hour</Button>
+             <Button variant="outline-secondary" size="sm" onClick={() => {
+                 const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9,0,0,0);
+                 const localIso = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                 setSnoozeDate(localIso);
+             }}>Tomorrow 9AM</Button>
+             <Button variant="outline-secondary" size="sm" onClick={() => {
+                 const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(9,0,0,0);
+                 const localIso = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                 setSnoozeDate(localIso);
+             }}>Next Week</Button>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowSnoozeModal(false)}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirmSnooze}>Snooze</Button>
+        </Modal.Footer>
+      </Modal>
+    </>
   );
 }

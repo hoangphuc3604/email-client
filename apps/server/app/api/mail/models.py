@@ -147,3 +147,7 @@ class ReplyEmailRequest(CamelModel):
     to: str
     subject: str
     body: str
+
+# Thêm vào cuối file hoặc chỗ phù hợp
+class SnoozeEmailRequest(CamelModel):
+    snooze_until: datetime
