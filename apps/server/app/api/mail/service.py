@@ -480,66 +480,75 @@ class MailService:
       except Exception as e:
           raise ValueError(f"Failed to create draft: {str(e)}")
 
+  # [CẬP NHẬT] Sửa lại hàm modify_email
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
       service = await self.get_gmail_service(user_id)
       
       print(f"[MODIFY EMAIL] user_id={user_id}, email_id={email_id}, updates={updates}")
 
-      add_labels = []
-      remove_labels = []
+      add_label_ids = []
+      remove_label_ids = []
 
-      # Handle unread/read status
+      # Xử lý unread
       if 'unread' in updates:
           if updates['unread']:
-              add_labels.append('UNREAD')
-              if 'UNREAD' in remove_labels:
-                  remove_labels.remove('UNREAD')
+              add_label_ids.append('UNREAD')
+              if 'UNREAD' in remove_label_ids: remove_label_ids.remove('UNREAD')
           else:
-              remove_labels.append('UNREAD')
-              if 'UNREAD' in add_labels:
-                  add_labels.remove('UNREAD')
+              remove_label_ids.append('UNREAD')
+              if 'UNREAD' in add_label_ids: add_label_ids.remove('UNREAD')
 
-      # Handle starred status
+      # Xử lý starred
       if 'starred' in updates:
           if updates['starred']:
-              add_labels.append('STARRED')
-              if 'STARRED' in remove_labels:
-                  remove_labels.remove('STARRED')
+              add_label_ids.append('STARRED')
+              if 'STARRED' in remove_label_ids: remove_label_ids.remove('STARRED')
           else:
-              remove_labels.append('STARRED')
-              if 'STARRED' in add_labels:
-                  add_labels.remove('STARRED')
+              remove_label_ids.append('STARRED')
+              if 'STARRED' in add_label_ids: add_label_ids.remove('STARRED')
 
-      # Handle custom labels array (e.g., labels: ['trash'] to move to trash)
+      # Xử lý trash
+      if updates.get('trash'):
+           add_label_ids.append('TRASH')
+           # Gmail tự động xóa các nhãn khác khi vào Trash, nhưng ta cứ thêm vào list xóa cho chắc
+           if 'TRASH' in remove_label_ids: remove_label_ids.remove('TRASH')
+
+      # [LOGIC MỚI] Xử lý custom labels (Todo, Done...)
       if 'labels' in updates:
           labels_to_add = updates.get('labels', [])
-          for label in labels_to_add:
-              label_upper = label.upper()
-              if label_upper not in add_labels:
-                  add_labels.append(label_upper)
-              # Remove from remove list if it was there
-              if label_upper in remove_labels:
-                  remove_labels.remove(label_upper)
-
-      # Handle trash flag
-      if updates.get('trash'):
-           if 'TRASH' not in add_labels:
-               add_labels.append('TRASH')
-           if 'TRASH' in remove_labels:
-               remove_labels.remove('TRASH')
+          
+          # Nếu di chuyển sang cột khác, ta cần xóa nhãn của cột cũ (Inbox, Todo, Done)
+          # Đây là logic Kanban: Email chỉ nên ở 1 cột
+          KANBAN_LABELS = ['INBOX', 'To Do', 'Done'] 
+          
+          # Lấy danh sách ID của các nhãn Kanban hiện tại để xóa
+          # Lưu ý: Logic này hơi phức tạp vì ta cần biết email đang có nhãn gì để xóa
+          # Để đơn giản cho bài tập: Frontend gửi label mới, ta thêm label mới và xóa INBOX nếu có.
+          
+          for label_name in labels_to_add:
+              # Lấy ID thật của nhãn (ví dụ: "todo" -> "Label_123")
+              real_label_id = await self._get_or_create_label_id(service, user_id, label_name)
+              
+              if real_label_id not in add_label_ids:
+                  add_label_ids.append(real_label_id)
+              
+              # Nếu thêm vào To Do hoặc Done, hãy xóa khỏi INBOX (Archive)
+              if label_name.lower() in ['todo', 'done']:
+                  remove_label_ids.append('INBOX')
 
       body = {
-          'addLabelIds': add_labels,
-          'removeLabelIds': remove_labels
+          'addLabelIds': add_label_ids,
+          'removeLabelIds': remove_label_ids
       }
       
-      print(f"[MODIFY EMAIL] Sending to Gmail API - add: {add_labels}, remove: {remove_labels}")
+      print(f"[MODIFY EMAIL] Sending to Gmail API - add: {add_label_ids}, remove: {remove_label_ids}")
 
-      updated_message = service.users().messages().modify(userId='me', id=email_id, body=body).execute()
-      
-      print(f"[MODIFY EMAIL] Gmail API response: {updated_message}")
+      try:
+          service.users().messages().modify(userId='me', id=email_id, body=body).execute()
+      except Exception as e:
+          print(f"Gmail API Error: {e}")
+          raise ValueError(f"Failed to modify email labels: {str(e)}")
 
-      # We need to return the updated email detail
       return await self.get_email_detail(user_id, email_id)
 
   def _ensure_filename_extension(self, filename: str, mime_type: str) -> str:
@@ -558,6 +567,8 @@ class MailService:
           return f"{filename}{extension}"
       
       return filename
+
+
 
   async def get_attachment(self, user_id: str, message_id: str, attachment_id: str):
       """Get attachment data and metadata (filename, mime_type) from Gmail API."""
@@ -698,3 +709,44 @@ class MailService:
       }
       logger.info(f"[Attachment] Returning result - filename: {result['filename']}, mime_type: {result['mime_type']}, data_size: {len(result['data'])}")
       return result
+
+# [THÊM MỚI] Hàm hỗ trợ tìm hoặc tạo Label ID từ tên
+  async def _get_or_create_label_id(self, service, user_id: str, label_name: str) -> str:
+      # Map các tên cột Kanban sang tên hiển thị trên Gmail
+      SYSTEM_LABELS = {'INBOX': 'INBOX', 'TRASH': 'TRASH', 'SPAM': 'SPAM', 'UNREAD': 'UNREAD', 'STARRED': 'STARRED'}
+      label_upper = label_name.upper()
+      
+      # Nếu là nhãn hệ thống, trả về ngay
+      if label_upper in SYSTEM_LABELS:
+          return SYSTEM_LABELS[label_upper]
+
+      # Chuẩn hóa tên hiển thị cho đẹp (todo -> To Do, done -> Done)
+      display_name = label_name.title() 
+      if label_upper == "TODO": display_name = "To Do"
+      
+      try:
+          # 1. Lấy danh sách tất cả nhãn hiện có
+          results = service.users().labels().list(userId='me').execute()
+          labels = results.get('labels', [])
+          
+          # 2. Tìm xem nhãn đã tồn tại chưa (so sánh tên)
+          for label in labels:
+              if label['name'].lower() == display_name.lower():
+                  return label['id'] # Trả về Label ID thật (vd: Label_34234)
+
+          # 3. Nếu chưa có, tạo mới nhãn trên Gmail
+          print(f"Creating new label: {display_name}")
+          created_label = service.users().labels().create(
+              userId='me', 
+              body={
+                  'name': display_name,
+                  'labelListVisibility': 'labelShow',
+                  'messageListVisibility': 'show'
+              }
+          ).execute()
+          return created_label['id']
+          
+      except Exception as e:
+          print(f"Error getting/creating label {label_name}: {str(e)}")
+          # Fallback: Trả về nguyên gốc nếu lỗi (có thể gây lỗi 400 nhưng tốt hơn là crash)
+          return label_name
