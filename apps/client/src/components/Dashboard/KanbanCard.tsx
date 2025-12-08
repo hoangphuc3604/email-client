@@ -27,17 +27,17 @@ export default function KanbanCard({ email, onClick }: KanbanCardProps) {
     >
       <Card.Body className="p-3">
         <div className="d-flex justify-content-between mb-2">
-          <small className="text-muted" style={{ fontSize: '0.8rem' }}>
+          <small className="text-info" style={{ fontSize: '0.8rem' }}>
             {sender}
           </small>
-          {isStarred ? <FaStar className="text-warning" /> : <FaRegStar className="text-muted" />}
+          {isStarred ? <FaStar className="text-warning" /> : <FaRegStar className="text-info" />}
         </div>
         
         <h6 className="mb-2" style={{ fontWeight: email.unread ? 'bold' : 'normal', color: '#fff' }}>
           {email.subject}
         </h6>
         
-        <Card.Text className="text-muted" style={{ fontSize: '0.85rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
+        <Card.Text style={{ fontSize: '0.85rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', color: '#c770f0' }}>
           {/* Đây là nơi sẽ hiển thị AI Summary sau này */}
           {summary}...
         </Card.Text>
