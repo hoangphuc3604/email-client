@@ -833,7 +833,7 @@ export default function Dashboard() {
       <Container className="dashboard-container">
         <Row className="dashboard-row">
           <Col md={2} className={`folder-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
-            <div className="folders-header">
+            <div className="folders-header pt-3">
               <h5>Mailboxes</h5>
             </div>
 
@@ -866,12 +866,28 @@ export default function Dashboard() {
           </Col>
               {/* Logic Render Dashboard */}
           {viewMode === 'kanban' ? (
-            // Hiển thị chế độ Kanban (chiếm toàn bộ chiều rộng còn lại 10/12 cột vì cột Folder là 2)
-            <Col md={10} className="h-100">
-              <KanbanBoard onOpenEmail={(email) => {
-                  openEmail(email); // Hàm mở chi tiết email có sẵn trong Dashboard
-                  // Optional: Chuyển về list view hoặc mở modal chi tiết
-              }} />
+            // Hiển thị chế độ Kanban với Header chứa nút Back
+            <Col md={10} className="h-100 d-flex flex-column">
+              {/* --- BẮT ĐẦU: Header mới cho Kanban --- */}
+              <div className="email-list-actions d-flex align-items-center justify-content-between mb-2">
+                <h5 className="m-0 text-white">Project Board</h5>
+                
+                {/* Nút quay về giao diện Danh sách (Dashboard chính) */}
+                <Button 
+                  variant="outline-info" 
+                  onClick={() => setViewMode('list')}
+                  className="d-flex align-items-center gap-2"
+                >
+                  <BsListUl /> Back to List
+                </Button>
+              </div>
+              {/* --- KẾT THÚC: Header mới --- */}
+
+              <div className="flex-grow-1" style={{ overflow: 'hidden' }}>
+                <KanbanBoard onOpenEmail={(email) => {
+                    openEmail(email);
+                }} />
+              </div>
             </Col>
           ) : (
             // Hiển thị chế độ List truyền thống (Giữ nguyên code cũ của bạn)
@@ -882,7 +898,7 @@ export default function Dashboard() {
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Switch View</Tooltip>}>
                 <Button 
                   variant="outline-info" 
-                  className="me-2"
+                  className="me"
                   onClick={() => setViewMode(viewMode === 'list' ? 'kanban' : 'list')}
                 >
                   {viewMode === 'list' ? <BsKanban /> : <BsListUl />}

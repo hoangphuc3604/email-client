@@ -66,8 +66,8 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
             style={{ minWidth: '300px' }}
           >
             <div className="p-3 mb-3 text-center rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid #c770f0' }}>
-              <h5 className="m-0 text-white">{col.title}</h5>
-              <small className="text-muted">{columnsData[col.id]?.length || 0} cards</small>
+              <h5 className="mt-2 text-info">{col.title}</h5>
+              <small className="text-white">{columnsData[col.id]?.length || 0} cards</small>
             </div>
             
             <div className="flex-grow-1 px-1 custom-scrollbar" style={{ overflowY: 'auto', minHeight: '0' }}>
@@ -79,7 +79,7 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
                 />
               ))}
               {(!columnsData[col.id] || columnsData[col.id].length === 0) && (
-                <div className="text-center text-muted mt-5">
+                <div className="text-center text-info mt-5">
                   Empty
                 </div>
               )}
