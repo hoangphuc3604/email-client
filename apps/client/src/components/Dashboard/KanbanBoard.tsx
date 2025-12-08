@@ -115,7 +115,7 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
   return (
     // Bọc toàn bộ khu vực kéo thả bằng DragDropContext
     <DragDropContext onDragEnd={onDragEnd}>
-      <div className="h-100 overflow-auto px-2" style={{ minHeight: '80vh' }}>
+      <div className="h-100 overflow-auto px-2" style={{ minHeight: '74vh' }}>
         <Row className="flex-nowrap h-100" style={{ overflowX: 'auto' }}>
           {COLUMNS.map((col) => (
             <Col 
