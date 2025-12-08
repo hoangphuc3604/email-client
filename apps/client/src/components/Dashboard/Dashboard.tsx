@@ -28,6 +28,7 @@ import {
   FaFileArchive,
   FaPen,
   FaDownload,
+  
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
@@ -849,6 +850,7 @@ export default function Dashboard() {
                       <div>
                         {String(f.id).toLowerCase() === 'inbox' && <FaInbox className="me-2" />}
                         {String(f.id).toLowerCase() === 'starred' && <FaStar className="me-2" />}
+                        
                         {String(f.id).toLowerCase() === 'sent' && <FaPaperPlane className="me-2" />}
                         {String(f.id).toLowerCase() === 'draft' && <FaPen className="me-2" />}
                         {String(f.id).toLowerCase() === 'archive' && <FaFileArchive className="me-2" />}

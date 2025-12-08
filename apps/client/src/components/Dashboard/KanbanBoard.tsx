@@ -13,6 +13,7 @@ interface KanbanBoardProps {
 const COLUMNS = [
   { id: 'inbox', title: 'Inbox' },
   { id: 'todo', title: 'To Do' },
+  
   { id: 'done', title: 'Done' }
 ];
 
@@ -75,11 +76,30 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
       
       // Update UI (Optimistic): Xóa card khỏi board hiện tại
       const newColumnsData = { ...columnsData };
+      
       Object.keys(newColumnsData).forEach(colId => {
         newColumnsData[colId] = newColumnsData[colId].filter(e => e.id !== snoozeTargetEmail);
       });
       setColumnsData(newColumnsData);
-      
+      const updatedColumns = { ...columnsData };
+      let snoozedItem = null;
+
+      // 1. Tìm và xóa khỏi cột cũ
+      Object.keys(updatedColumns).forEach(colId => {
+        const index = updatedColumns[colId].findIndex(e => e.id === snoozeTargetEmail);
+        if (index !== -1) {
+          snoozedItem = updatedColumns[colId][index];
+          updatedColumns[colId] = updatedColumns[colId].filter(e => e.id !== snoozeTargetEmail);
+        }
+      });
+
+      // 2. Thêm vào cột Snoozed (nếu tìm thấy item)
+      if (snoozedItem) {
+        // Cập nhật timestamp để hiển thị đúng (optional)
+        updatedColumns['snoozed'] = [snoozedItem, ...(updatedColumns['snoozed'] || [])];
+      }
+
+      setColumnsData(updatedColumns);
       setShowSnoozeModal(false);
       // alert("Email snoozed successfully!"); // Có thể bỏ alert cho mượt
     } catch (e) {

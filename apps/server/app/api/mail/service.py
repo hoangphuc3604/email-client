@@ -13,7 +13,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import mimetypes
-from datetime import datetime
+
 
 logger = logging.getLogger(__name__)
 from app.api.mail.models import (
@@ -595,6 +595,25 @@ class MailService:
               if label_name.lower() in ['todo', 'done']:
                   remove_label_ids.append('INBOX')
 
+              if label_name.lower() == 'inbox':
+                  # Tìm ID của Todo và Done để xóa
+                  todo_id = await self._get_or_create_label_id(service, user_id, 'To Do')
+                  done_id = await self._get_or_create_label_id(service, user_id, 'Done')
+                  snooze_id = await self._get_or_create_label_id(service, user_id, 'SNOOZED')
+                  
+                  remove_label_ids.extend([todo_id, done_id, snooze_id])
+            # Nếu label mới là 'todo' hoặc 'done', hãy xóa 'INBOX' và nhãn còn lại
+              elif label_name.lower() in ['todo', 'done', 'to do']:
+                  remove_label_ids.append('INBOX')
+                  
+                  # Nếu đang chuyển sang Done, thì xóa Todo và ngược lại
+                  if label_name.lower() in ['done']:
+                       todo_id = await self._get_or_create_label_id(service, user_id, 'To Do')
+                       remove_label_ids.append(todo_id)
+                  elif label_name.lower() in ['todo', 'to do']:
+                       done_id = await self._get_or_create_label_id(service, user_id, 'Done')
+                       remove_label_ids.append(done_id)
+
       body = {
           'addLabelIds': add_label_ids,
           'removeLabelIds': remove_label_ids
@@ -866,7 +885,7 @@ class MailService:
                     'removeLabelIds': [snooze_label_id]
                 }
                 service.users().messages().modify(userId='me', id=email_id, body=body).execute()
-
+                
                 # Đánh dấu đã hoàn thành trong DB
                 await self.snoozed_collection.update_one(
                     {"_id": record["_id"]},
