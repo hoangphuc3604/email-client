@@ -23,14 +23,19 @@ export interface ModifyEmailPayload {
   trash?: boolean
 }
 
+// CHUYỂN ĐỔI: Sử dụng endpoint mock-mail để test tính năng Kanban với dữ liệu giả
+// Nếu muốn chạy với Gmail thật, hãy đổi thành '/mail'
+const BASE_ENDPOINT = '/mail' 
+
 const mailApi = {
   async listMailboxes() {
-    const res = await api.get('/mail/mailboxes')
+    // Lưu ý: Endpoint mock mailboxes là /mock-mail/mailboxes
+    const res = await api.get(`${BASE_ENDPOINT}/mailboxes`)
     return res.data?.data || res.data || []
   },
 
   async listEmails(mailboxId: string, limit: number = 50, pageToken?: string) {
-    const res = await api.get(`/mail/mailboxes/${mailboxId}/emails`, {
+    const res = await api.get(`${BASE_ENDPOINT}/mailboxes/${mailboxId}/emails`, {
       params: { 
         limit,
         ...(pageToken && { page_token: pageToken })
@@ -40,7 +45,7 @@ const mailApi = {
   },
 
   async getEmail(emailId: string) {
-    const res = await api.get(`/mail/emails/${emailId}`)
+    const res = await api.get(`${BASE_ENDPOINT}/emails/${emailId}`)
     return res.data?.data || res.data
   },
 
@@ -60,7 +65,7 @@ const mailApi = {
       })
     }
     
-    const res = await api.post(`/mail/emails/send`, formData, {
+    const res = await api.post(`${BASE_ENDPOINT}/emails/send`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
@@ -82,7 +87,7 @@ const mailApi = {
       })
     }
     
-    const res = await api.post(`/mail/emails/${emailId}/reply`, formData, {
+    const res = await api.post(`${BASE_ENDPOINT}/emails/${emailId}/reply`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
@@ -91,18 +96,19 @@ const mailApi = {
   },
 
   async modifyEmail(emailId: string, updates: ModifyEmailPayload) {
-    const res = await api.post(`/mail/emails/${emailId}/modify`, updates)
+    // Gọi đến Mock API để cập nhật mock_data
+    const res = await api.post(`${BASE_ENDPOINT}/emails/${emailId}/modify`, updates)
     return res.data?.data || res.data
   },
 
   async searchEmails(query: string) {
-    const res = await api.get(`/mail/search?q=${encodeURIComponent(query)}`)
+    const res = await api.get(`${BASE_ENDPOINT}/search?q=${encodeURIComponent(query)}`)
     return res.data?.data || res.data
   },
 
   async downloadAttachment(messageId: string, attachmentId: string) {
     // Pass attachment ID as query parameter to avoid URL encoding issues
-    const res = await api.get(`/mail/attachments`, {
+    const res = await api.get(`${BASE_ENDPOINT}/attachments`, {
       params: {
         attachmentId: attachmentId,
         messageId: messageId
@@ -131,7 +137,9 @@ const mailApi = {
       })
     }
     
-    const res = await api.post(`/mail/drafts`, formData, {
+    // Lưu ý: Mock API có thể chưa có endpoint drafts, fallback về mail thật nếu cần
+    // Nhưng tạm thời để mock cho đồng bộ
+    const res = await api.post(`${BASE_ENDPOINT}/drafts`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
