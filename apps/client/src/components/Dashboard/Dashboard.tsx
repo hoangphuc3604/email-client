@@ -29,6 +29,7 @@ import {
   FaPen,
   FaDownload,
   FaClock,
+  FaTasks,
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
@@ -45,8 +46,8 @@ const LABEL_NAME_MAP: Record<string, string> = {
   'SNOOZED': 'Snoozed',
 }
 
-// Gmail system labels we want to display
-const ESSENTIAL_LABELS = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH','SNOOZED']
+// Gmail system labels we want to display + kanban labels
+const ESSENTIAL_LABELS = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH', 'SNOOZED', 'TODO', 'TO DO']
 
 function timeAgo(ts: number) {
   const s = Math.floor((Date.now() - ts) / 1000)
@@ -248,10 +249,17 @@ export default function Dashboard() {
     setLoadingMailboxes(true)
     try {
       const data = await mailApi.listMailboxes()
-      // Filter to only show essential system labels (Gmail standard labels)
-      const filtered = (data || []).filter((box: any) => 
-        ESSENTIAL_LABELS.includes(String(box.id).toUpperCase())
-      ).map((box: any) => ({
+      // Filter to show essential labels or kanban labels by id or name (case-insensitive)
+      const filtered = (data || []).filter((box: any) => {
+        const idUpper = String(box.id).toUpperCase()
+        const nameUpper = String(box.name || '').toUpperCase()
+
+        const isSystem = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(idUpper) || ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(nameUpper)
+        const isSnoozed = idUpper === 'SNOOZED' || nameUpper === 'SNOOZED'
+        const isTodo = nameUpper === 'TO DO' // yêu cầu: kiểm tra theo name "To Do"
+
+        return isSystem || isSnoozed || isTodo
+      }).map((box: any) => ({
         ...box,
         id: String(box.id).toLowerCase(), // normalize to lowercase for UI
         name: LABEL_NAME_MAP[String(box.id).toUpperCase()] || box.name,
@@ -851,13 +859,15 @@ export default function Dashboard() {
                       <div>
                         {String(f.id).toLowerCase() === 'inbox' && <FaInbox className="me-2" />}
                         {String(f.id).toLowerCase() === 'starred' && <FaStar className="me-2" />}
-                        
                         {String(f.id).toLowerCase() === 'sent' && <FaPaperPlane className="me-2" />}
                         {String(f.id).toLowerCase() === 'draft' && <FaPen className="me-2" />}
                         {String(f.id).toLowerCase() === 'archive' && <FaFileArchive className="me-2" />}
                         {String(f.id).toLowerCase() === 'trash' && <FaTrash className="me-2" />}
-                        {String(f.id).toLowerCase() === 'snoozed' && <FaClock className="me-2" />}
-                        {f.name}
+                        {(String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do') && <FaTasks className="me-2" />}
+                        {(String(f.id).toLowerCase() === 'snoozed' || String(f.name || '').toLowerCase() === 'snoozed') && <FaClock className="me-2" />}
+                        {String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do'
+                          ? 'Todo'
+                          : f.name}
                       </div>
                       {String(f.id).toLowerCase() === 'inbox' && unreadInboxCount > 0 && (
                         <Badge bg="danger">{unreadInboxCount}</Badge>
