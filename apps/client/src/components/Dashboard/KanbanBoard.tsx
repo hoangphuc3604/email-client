@@ -1,57 +1,24 @@
 // apps/client/src/components/Dashboard/KanbanBoard.tsx
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Row, Col, Spinner, Modal, Form, Button } from 'react-bootstrap';
 import KanbanCard from './KanbanCard';
-import mailApi from '../../api/mail';
 import { FaClock } from 'react-icons/fa';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
+import { KANBAN_COLUMNS, useKanbanColumns, useMoveEmail, useSnoozeEmail } from '../../hooks/useKanban';
 
 interface KanbanBoardProps {
   onOpenEmail: (email: any) => void;
 }
 
-// [CẬP NHẬT] Thêm cột Snoozed vào danh sách cột
-const COLUMNS = [
-  { id: 'inbox', title: 'Inbox' },
-  { id: 'todo', title: 'To Do' },
-  { id: 'snoozed', title: 'Snoozed' }, // Thêm cột Snoozed
-  { id: 'done', title: 'Done' }
-];
-
 export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
-  const [columnsData, setColumnsData] = useState<Record<string, any[]>>({});
-  const [loading, setLoading] = useState(true);
+  const { data: columnsData, isLoading } = useKanbanColumns();
+  const moveEmail = useMoveEmail();
+  const snoozeEmail = useSnoozeEmail();
   
   // State cho Snooze Modal
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
   const [snoozeTargetEmail, setSnoozeTargetEmail] = useState<string | null>(null);
   const [snoozeDate, setSnoozeDate] = useState("");
-
-  useEffect(() => {
-    fetchAllColumns();
-  }, []);
-
-  const fetchAllColumns = async () => {
-    setLoading(true);
-    try {
-      const newData: Record<string, any[]> = {};
-      
-      await Promise.all(COLUMNS.map(async (col) => {
-        try {
-          const res = await mailApi.listEmails(col.id, 10);
-          const emails = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : []);
-          newData[col.id] = emails;
-        } catch (e) {
-          console.error(`Error loading column ${col.id}`, e);
-          newData[col.id] = [];
-        }
-      }));
-
-      setColumnsData(newData);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Hàm mở modal snooze
   const handleOpenSnooze = (emailId: string) => {
@@ -71,31 +38,10 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     if (!snoozeTargetEmail || !snoozeDate) return;
 
     try {
-      // Gọi API Snooze
-      await mailApi.snoozeEmail(snoozeTargetEmail, new Date(snoozeDate).toISOString());
-      
-      // Update UI (Optimistic)
-      const newColumnsData = { ...columnsData };
-      let snoozedItem = null;
-
-      // 1. Tìm và xóa khỏi cột cũ (Inbox, Todo, Done...)
-      Object.keys(newColumnsData).forEach(colId => {
-        if (colId === 'snoozed') return; // Không xóa nếu đang ở cột snoozed
-        const index = newColumnsData[colId]?.findIndex(e => e.id === snoozeTargetEmail);
-        if (index !== undefined && index !== -1) {
-          snoozedItem = newColumnsData[colId][index];
-          newColumnsData[colId] = newColumnsData[colId].filter(e => e.id !== snoozeTargetEmail);
-        }
+      await snoozeEmail.mutateAsync({
+        emailId: snoozeTargetEmail,
+        snoozeUntil: new Date(snoozeDate).toISOString()
       });
-
-      // 2. Thêm vào cột Snoozed để hiển thị ngay lập tức
-      if (snoozedItem) {
-        // Đảm bảo cột snoozed tồn tại
-        if (!newColumnsData['snoozed']) newColumnsData['snoozed'] = [];
-        newColumnsData['snoozed'] = [snoozedItem, ...newColumnsData['snoozed']];
-      }
-
-      setColumnsData(newColumnsData);
       setShowSnoozeModal(false);
     } catch (e) {
       console.error("Snooze failed", e);
@@ -124,34 +70,16 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     }
 
     // Logic di chuyển thông thường (Inbox <-> Todo <-> Done)
-    const newColumnsData = { ...columnsData };
-    const draggedItem = newColumnsData[sourceColId][source.index];
-
-    newColumnsData[sourceColId].splice(source.index, 1);
-    
-    if (sourceColId === destColId) {
-      newColumnsData[sourceColId].splice(destination.index, 0, draggedItem);
-    } else {
-      newColumnsData[destColId].splice(destination.index, 0, draggedItem);
-    }
-
-    setColumnsData(newColumnsData);
-
-    if (sourceColId !== destColId) {
-      try {
-        console.log(`Moving email ${draggableId} to ${destColId}`);
-        await mailApi.modifyEmail(draggableId, {
-          labels: [destColId] 
-        });
-      } catch (error) {
-        console.error("Failed to update move on backend:", error);
-        alert("Failed to move card. Please try again.");
-        fetchAllColumns();
-      }
-    }
+    // Optimistic move handled inside mutation
+    moveEmail.mutate({
+      emailId: draggableId,
+      from: sourceColId as any,
+      to: destColId as any,
+      index: destination.index
+    });
   };
 
-  if (loading) {
+  if (isLoading && !columnsData) {
     return (
       <div className="d-flex justify-content-center align-items-center h-100">
         <Spinner animation="border" variant="light" />
@@ -164,7 +92,7 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="h-100 overflow-auto px-2" style={{ minHeight: '74vh' }}>
           <Row className="flex-nowrap h-100" style={{ overflowX: 'auto' }}>
-            {COLUMNS.map((col) => (
+            {KANBAN_COLUMNS.map((col) => (
               <Col 
                 key={col.id} 
                 md={3} // Giảm độ rộng cột một chút để vừa 4 cột
@@ -192,7 +120,7 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
                         borderRadius: '8px'
                       }}
                     >
-                      {columnsData[col.id]?.map((email: any, index: number) => (
+                      {(columnsData[col.id] || []).map((email: any, index: number) => (
                         <Draggable 
                           key={email.id} 
                           draggableId={email.id} 
@@ -267,8 +195,11 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
           </div>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowSnoozeModal(false)}>Cancel</Button>
-          <Button variant="primary" onClick={handleConfirmSnooze}>Snooze</Button>
+          <Button variant="secondary" onClick={() => setShowSnoozeModal(false)} disabled={snoozeEmail.isLoading}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirmSnooze} disabled={snoozeEmail.isLoading}>
+            {snoozeEmail.isLoading && <Spinner size="sm" animation="border" className="me-2" />}
+            {snoozeEmail.isLoading ? 'Snoozing...' : 'Snooze'}
+          </Button>
         </Modal.Footer>
       </Modal>
     </>
