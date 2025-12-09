@@ -1,4 +1,3 @@
-// apps/client/src/components/Dashboard/KanbanCard.tsx
 import { Card, Badge } from 'react-bootstrap';
 import { FaStar, FaRegStar, FaClock } from 'react-icons/fa'; // Gộp import icon cho gọn
 
@@ -24,7 +23,8 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
         border: email.unread ? '1px solid #c770f0' : '1px solid rgba(255,255,255,0.1)',
         color: 'white'
       }}
-      onClick={() => onClick(email)}
+      // SỬA TẠI ĐÂY: Dùng onDoubleClick thay vì onClick
+      onDoubleClick={() => onClick(email)}
     >
       <Card.Body className="p-3">
         {/* Header: Sender + Icons */}
@@ -33,7 +33,7 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
             {sender}
           </small>
           
-          {/* Khu vực Action Icons: Snooze & Star */}
+          {/* Khu vực Action Icons: Snooze & Star - Dùng stopPropagation để tránh kích hoạt mở mail */}
           <div onClick={(e) => e.stopPropagation()} className="d-flex align-items-center gap-2"> 
               {/* Nút Snooze */}
               {onSnooze && (
@@ -53,7 +53,6 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
               )}
           </div>
         </div> 
-        {/* */}
         
         {/* Subject */}
         <h6 className="mb-2" style={{ fontWeight: email.unread ? 'bold' : 'normal', color: '#fff' }}>
