@@ -87,7 +87,7 @@
 /* High-contrast list rows */
 .email-list .list-group-item {
   background: #231e2b; /* deep dark row */
-  color: #ffffff; /* white text */
+  color: #0b3af4; /* white text */
   border: none;
   border-bottom: 1px solid rgba(255,255,255,0.04);
   cursor: pointer;
@@ -96,13 +96,13 @@
 }
 
 .email-list .list-group-item:hover {
-  background: #ffffff;
+  background: #fc10e0;
   color: #111;
 }
 
 /* clearer small text - all white */
 .email-list .sender { 
-  color: #ffffff; 
+  color: #0b3af4; 
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -147,7 +147,7 @@
 .email-list .list-group-item.cursor,
 .email-list .list-group-item.selected,
 .email-list .list-group-item:active {
-  background: #ffffff !important;
+  background: #d676f8 !important;
   color: #111 !important;
 }
 
