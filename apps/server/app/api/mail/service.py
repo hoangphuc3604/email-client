@@ -6,6 +6,7 @@ from app.config import settings
 from bson import ObjectId
 import email.utils
 from datetime import datetime, timezone
+from typing import Optional
 import base64
 import logging
 from email.mime.text import MIMEText
@@ -28,12 +29,20 @@ from app.api.mail.models import (
     Label,
     Attachment
 )
+from app.api.agents.summarizer import Summarizer
 
 class MailService:
   def __init__(self, db: Database):
     self.db = db
     self.users_collection = self.db["users"]
     self.snoozed_collection = self.db["snoozed_emails"] # Collection mới để lưu trạng thái snooze
+    # Lazy init summarizer to avoid raising at import time when key is missing
+    self._summarizer: Optional[Summarizer] = None
+
+  def _get_summarizer(self) -> Summarizer:
+    if self._summarizer is None:
+      self._summarizer = Summarizer()
+    return self._summarizer
   async def get_gmail_service(self, user_id: str):
     user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
     if not user or "google_refresh_token" not in user:
@@ -68,7 +77,7 @@ class MailService:
       for label in labels
     ]
 
-  async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50):
+  async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
     """
     Lấy danh sách email từ Gmail dựa trên mailbox_id (nhãn).
     Hàm này tự động phân giải tên nhãn (ví dụ: 'todo') sang Gmail Label ID thực tế (ví dụ: 'Label_234').
@@ -173,6 +182,14 @@ class MailService:
           internal_date = msg_data.get('internalDate')
           received_on = datetime.fromtimestamp(int(internal_date)/1000).isoformat() if internal_date else ""
 
+          preview_body = msg_data.get('snippet', '')
+          summary_text = None
+          if summarize:
+              try:
+                  summary_text = await self._get_summarizer().summarize(preview_body)
+              except Exception as e:
+                  logger.warning(f"Summarize preview failed for {msg.get('id')}: {e}")
+
           # Mapping dữ liệu trả về cho Frontend
           thread_list.append({
             "id": msg['id'],
@@ -184,7 +201,8 @@ class MailService:
             "unread": "UNREAD" in msg_data.get('labelIds', []),
             # Trả về danh sách tags/labels để frontend hiển thị (nếu cần)
             "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
-            "body": msg_data.get('snippet', '') # Snippet là bản tóm tắt ngắn của body
+            "body": preview_body, # Snippet là bản tóm tắt ngắn của body
+            "summary": summary_text
           })
       except Exception as e:
           # Log lỗi nhưng không làm chết cả danh sách nếu 1 email lỗi
@@ -197,7 +215,7 @@ class MailService:
       "result_size_estimate": result_size_estimate
     }
 
-  async def get_email_detail(self, user_id: str, email_id: str) -> ThreadDetailResponse:
+  async def get_email_detail(self, user_id: str, email_id: str, summarize: bool = False) -> ThreadDetailResponse:
     service = await self.get_gmail_service(user_id)
     
     # First try to get the message to find the threadId
@@ -217,6 +235,11 @@ class MailService:
     parsed_messages = []
     for msg in messages:
         parsed = self._parse_gmail_message(msg)
+        if summarize:
+            try:
+                parsed["summary"] = await self._get_summarizer().summarize(parsed.get("body", ""))
+            except Exception as e:
+                logger.warning(f"Summarize detail failed for {msg.get('id')}: {e}")
         parsed_messages.append(parsed)
     
     # Sort by date
@@ -787,6 +810,26 @@ class MailService:
       }
       logger.info(f"[Attachment] Returning result - filename: {result['filename']}, mime_type: {result['mime_type']}, data_size: {len(result['data'])}")
       return result
+
+  async def summarize_email(self, user_id: str, email_id: str) -> dict:
+      """Summarize a single email's latest message."""
+      detail = await self.get_email_detail(user_id, email_id, summarize=False)
+      latest = detail.get("latest") if isinstance(detail, dict) else detail.latest  # detail is dict-like
+
+      body = ""
+      if isinstance(latest, dict):
+          body = latest.get("body", "") or latest.get("decoded_body", "") or ""
+      else:
+          body = getattr(latest, "body", "") or getattr(latest, "decoded_body", "") or ""
+
+      summary_text = ""
+      try:
+          summary_text = await self._get_summarizer().summarize(body)
+      except Exception as e:
+          logger.warning(f"Summarize single email failed for {email_id}: {e}")
+          summary_text = ""
+
+      return {"email_id": email_id, "summary": summary_text}
 
 # [THÊM MỚI] Hàm hỗ trợ tìm hoặc tạo Label ID từ tên
   async def _get_or_create_label_id(self, service, user_id: str, label_name: str) -> str:

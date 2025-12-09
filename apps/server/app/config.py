@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = "http://localhost:5173"
     ENCRYPTION_KEY: str = ""
     FRONTEND_URL: str = ""
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     model_config = SettingsConfigDict(env_file=".env.local")
 
