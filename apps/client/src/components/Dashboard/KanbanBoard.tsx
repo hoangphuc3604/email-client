@@ -1,6 +1,6 @@
 // apps/client/src/components/Dashboard/KanbanBoard.tsx
 import { useState, useEffect } from 'react';
-import { Row, Col, Spinner, Modal, Form, Button } from 'react-bootstrap'; // Gộp import
+import { Row, Col, Spinner, Modal, Form, Button } from 'react-bootstrap';
 import KanbanCard from './KanbanCard';
 import mailApi from '../../api/mail';
 import { FaClock } from 'react-icons/fa';
@@ -10,10 +10,11 @@ interface KanbanBoardProps {
   onOpenEmail: (email: any) => void;
 }
 
+// [CẬP NHẬT] Thêm cột Snoozed vào danh sách cột
 const COLUMNS = [
   { id: 'inbox', title: 'Inbox' },
   { id: 'todo', title: 'To Do' },
-  
+  { id: 'snoozed', title: 'Snoozed' }, // Thêm cột Snoozed
   { id: 'done', title: 'Done' }
 ];
 
@@ -59,9 +60,8 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     const tmr = new Date();
     tmr.setDate(tmr.getDate() + 1);
     tmr.setHours(9, 0, 0, 0);
-    // Format YYYY-MM-DDTHH:mm cho input datetime-local
-    // Lưu ý: toISOString() trả về UTC, cần chỉnh lại nếu muốn hiển thị giờ địa phương chính xác trên input
-    // Cách đơn giản nhất để lấy format local cho input:
+    
+    // Fix múi giờ cho input datetime-local
     const localIsoString = new Date(tmr.getTime() - (tmr.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
     setSnoozeDate(localIsoString); 
     setShowSnoozeModal(true);
@@ -74,34 +74,29 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
       // Gọi API Snooze
       await mailApi.snoozeEmail(snoozeTargetEmail, new Date(snoozeDate).toISOString());
       
-      // Update UI (Optimistic): Xóa card khỏi board hiện tại
+      // Update UI (Optimistic)
       const newColumnsData = { ...columnsData };
-      
-      Object.keys(newColumnsData).forEach(colId => {
-        newColumnsData[colId] = newColumnsData[colId].filter(e => e.id !== snoozeTargetEmail);
-      });
-      setColumnsData(newColumnsData);
-      const updatedColumns = { ...columnsData };
       let snoozedItem = null;
 
-      // 1. Tìm và xóa khỏi cột cũ
-      Object.keys(updatedColumns).forEach(colId => {
-        const index = updatedColumns[colId].findIndex(e => e.id === snoozeTargetEmail);
-        if (index !== -1) {
-          snoozedItem = updatedColumns[colId][index];
-          updatedColumns[colId] = updatedColumns[colId].filter(e => e.id !== snoozeTargetEmail);
+      // 1. Tìm và xóa khỏi cột cũ (Inbox, Todo, Done...)
+      Object.keys(newColumnsData).forEach(colId => {
+        if (colId === 'snoozed') return; // Không xóa nếu đang ở cột snoozed
+        const index = newColumnsData[colId]?.findIndex(e => e.id === snoozeTargetEmail);
+        if (index !== undefined && index !== -1) {
+          snoozedItem = newColumnsData[colId][index];
+          newColumnsData[colId] = newColumnsData[colId].filter(e => e.id !== snoozeTargetEmail);
         }
       });
 
-      // 2. Thêm vào cột Snoozed (nếu tìm thấy item)
+      // 2. Thêm vào cột Snoozed để hiển thị ngay lập tức
       if (snoozedItem) {
-        // Cập nhật timestamp để hiển thị đúng (optional)
-        updatedColumns['snoozed'] = [snoozedItem, ...(updatedColumns['snoozed'] || [])];
+        // Đảm bảo cột snoozed tồn tại
+        if (!newColumnsData['snoozed']) newColumnsData['snoozed'] = [];
+        newColumnsData['snoozed'] = [snoozedItem, ...newColumnsData['snoozed']];
       }
 
-      setColumnsData(updatedColumns);
+      setColumnsData(newColumnsData);
       setShowSnoozeModal(false);
-      // alert("Email snoozed successfully!"); // Có thể bỏ alert cho mượt
     } catch (e) {
       console.error("Snooze failed", e);
       alert("Failed to snooze email.");
@@ -122,6 +117,13 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     const sourceColId = source.droppableId;
     const destColId = destination.droppableId;
 
+    // [LOGIC MỚI] Nếu kéo vào cột Snoozed -> Mở Modal Snooze thay vì chuyển ngay
+    if (destColId === 'snoozed') {
+      handleOpenSnooze(draggableId);
+      return; // Dừng logic di chuyển mặc định, chờ user confirm trên Modal
+    }
+
+    // Logic di chuyển thông thường (Inbox <-> Todo <-> Done)
     const newColumnsData = { ...columnsData };
     const draggedItem = newColumnsData[sourceColId][source.index];
 
@@ -165,9 +167,9 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
             {COLUMNS.map((col) => (
               <Col 
                 key={col.id} 
-                md={4} 
+                md={3} // Giảm độ rộng cột một chút để vừa 4 cột
                 className="d-flex flex-column"
-                style={{ minWidth: '300px' }}
+                style={{ minWidth: '270px' }}
               >
                 <div className="p-3 mb-3 text-center rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid #c770f0' }}>
                   <h5 className="m-0 text-white">{col.title}</h5>
@@ -210,7 +212,7 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
                               <KanbanCard 
                                 email={email} 
                                 onClick={onOpenEmail}
-                                onSnooze={handleOpenSnooze} /* [SỬA] Đã thêm prop này */
+                                onSnooze={handleOpenSnooze}
                               />
                             </div>
                           )}
@@ -249,7 +251,6 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
           <div className="d-flex gap-2 mt-3 justify-content-center">
              <Button variant="outline-secondary" size="sm" onClick={() => {
                  const d = new Date(); d.setHours(d.getHours() + 1); 
-                 // Fix múi giờ cho input local
                  const localIso = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
                  setSnoozeDate(localIso);
              }}>+1 Hour</Button>
