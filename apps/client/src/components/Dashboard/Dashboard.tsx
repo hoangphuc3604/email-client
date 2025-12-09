@@ -28,7 +28,7 @@ import {
   FaFileArchive,
   FaPen,
   FaDownload,
-  
+  FaClock,
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
@@ -42,10 +42,11 @@ const LABEL_NAME_MAP: Record<string, string> = {
   'SENT': 'Sent',
   'DRAFT': 'Drafts',
   'TRASH': 'Trash',
+  'SNOOZED': 'Snoozed',
 }
 
 // Gmail system labels we want to display
-const ESSENTIAL_LABELS = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH']
+const ESSENTIAL_LABELS = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH','SNOOZED']
 
 function timeAgo(ts: number) {
   const s = Math.floor((Date.now() - ts) / 1000)
@@ -855,6 +856,7 @@ export default function Dashboard() {
                         {String(f.id).toLowerCase() === 'draft' && <FaPen className="me-2" />}
                         {String(f.id).toLowerCase() === 'archive' && <FaFileArchive className="me-2" />}
                         {String(f.id).toLowerCase() === 'trash' && <FaTrash className="me-2" />}
+                        {String(f.id).toLowerCase() === 'snoozed' && <FaClock className="me-2" />}
                         {f.name}
                       </div>
                       {String(f.id).toLowerCase() === 'inbox' && unreadInboxCount > 0 && (
