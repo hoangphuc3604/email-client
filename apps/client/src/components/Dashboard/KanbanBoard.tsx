@@ -90,8 +90,8 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
   return (
     <>
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="h-100 overflow-auto px-2" style={{ minHeight: '74vh' }}>
-          <Row className="flex-nowrap h-100" style={{ overflowX: 'auto' }}>
+        <div className="kanban-scroll-container h-100 px-2" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+          <Row className="flex-nowrap" style={{ width: 'max-content', minWidth: '100%', height: '100%' }}>
             {KANBAN_COLUMNS.map((col) => (
               <Col 
                 key={col.id} 

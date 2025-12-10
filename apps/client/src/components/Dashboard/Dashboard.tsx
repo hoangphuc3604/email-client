@@ -906,7 +906,7 @@ export default function Dashboard() {
                       <BsListUl /> Back to List
                     </Button>
                   </div>
-                  <div className="flex-grow-1" style={{ overflow: 'hidden' }}>
+                  <div className="flex-grow-1" style={{ overflow: 'auto', height: '100%' }}>
                     <KanbanBoard onOpenEmail={(email) => openEmail(email)} />
                   </div>
                 </>
