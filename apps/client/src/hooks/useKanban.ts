@@ -40,10 +40,21 @@ export function useKanbanColumns() {
     queryKey: ['kanban', 'columns'],
     queryFn: fetchColumns,
     staleTime: 1000 * 30,
+    retry: 2,
+    refetchOnWindowFocus: false,
   })
 
-  // Always return an object to simplify consumer code
-  const data = useMemo<ColumnsData>(() => query.data || {}, [query.data])
+  // Always return an object with empty arrays to prevent undefined access
+  const data = useMemo<ColumnsData>(() => {
+    const result = query.data || {}
+    // Ensure all columns exist with at least empty arrays
+    KANBAN_COLUMNS.forEach(col => {
+      if (!result[col.id]) {
+        result[col.id] = []
+      }
+    })
+    return result
+  }, [query.data])
 
   return { ...query, data }
 }

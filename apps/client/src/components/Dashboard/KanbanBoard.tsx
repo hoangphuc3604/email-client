@@ -11,7 +11,7 @@ interface KanbanBoardProps {
 }
 
 export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
-  const { data: columnsData, isLoading } = useKanbanColumns();
+  const { data: columnsData, isLoading, isError, error } = useKanbanColumns();
   const moveEmail = useMoveEmail();
   const snoozeEmail = useSnoozeEmail();
   
@@ -79,10 +79,27 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     });
   };
 
-  if (isLoading && !columnsData) {
+  // Show error state
+  if (isError) {
+    return (
+      <div className="d-flex flex-column justify-content-center align-items-center h-100 text-center p-4">
+        <div className="text-danger mb-3">
+          <h5>Failed to load Kanban board</h5>
+          <p>{error instanceof Error ? error.message : 'Unknown error occurred'}</p>
+        </div>
+        <Button variant="outline-light" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  // Show loading only on initial load when no data exists
+  if (isLoading && Object.keys(columnsData).length === 0) {
     return (
       <div className="d-flex justify-content-center align-items-center h-100">
         <Spinner animation="border" variant="light" />
+        <span className="ms-3 text-white">Loading emails...</span>
       </div>
     );
   }
