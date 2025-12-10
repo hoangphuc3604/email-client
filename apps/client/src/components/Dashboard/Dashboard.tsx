@@ -44,6 +44,8 @@ const LABEL_NAME_MAP: Record<string, string> = {
   'DRAFT': 'Drafts',
   'TRASH': 'Trash',
   'SNOOZED': 'Snoozed',
+  'TODO': 'Todo',
+  'DONE': 'Done',
 }
 
 function timeAgo(ts: number) {
@@ -237,15 +239,37 @@ export default function Dashboard() {
 
         const isSystem = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(idUpper) || ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(nameUpper)
         const isSnoozed = idUpper === 'SNOOZED' || nameUpper === 'SNOOZED'
-        const isTodo = nameUpper === 'TO DO' 
+        const isTodo = idUpper === 'TODO' || nameUpper === 'TODO' || nameUpper === 'TO DO'
+        const isDone = idUpper === 'DONE' || nameUpper === 'DONE'
 
-        return isSystem || isSnoozed || isTodo
-      }).map((box: any) => ({
-        ...box,
-        id: String(box.id).toLowerCase(),
-        name: LABEL_NAME_MAP[String(box.id).toUpperCase()] || box.name,
-        unreadCount: box.unread_count || 0
-      }))
+        return isSystem || isSnoozed || isTodo || isDone
+      }).map((box: any) => {
+        const idUpper = String(box.id).toUpperCase()
+        const nameUpper = String(box.name || '').toUpperCase()
+        let displayName = LABEL_NAME_MAP[idUpper] || box.name
+        let normalizedId = String(box.id).toLowerCase()
+
+        console.log('Mailbox:', box.id, box.name, '->', displayName);
+        
+        // Normalize IDs and display names for custom labels
+        if (nameUpper === 'TODO' || nameUpper === 'TO DO') {
+          normalizedId = 'todo'
+          displayName = 'Todo'
+        } else if (nameUpper === 'DONE') {
+          normalizedId = 'done'
+          displayName = 'Done'
+        } else if (nameUpper === 'SNOOZED') {
+          normalizedId = 'snoozed'
+          displayName = 'Snoozed'
+        }
+        
+        return {
+          ...box,
+          id: normalizedId,
+          name: displayName,
+          unreadCount: box.unread_count || 0
+        }
+      })
       setMailboxes(filtered.length > 0 ? filtered : [])
       setLoadingMailboxes(false)
       
@@ -872,6 +896,7 @@ export default function Dashboard() {
                         {String(f.id).toLowerCase() === 'trash' && <FaTrash className="me-2" />}
                         {(String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do') && <FaTasks className="me-2" />}
                         {(String(f.id).toLowerCase() === 'snoozed' || String(f.name || '').toLowerCase() === 'snoozed') && <FaClock className="me-2" />}
+                        {String(f.id).toLowerCase() === 'done' && <FaCheckSquare className="me-2" />}
                         {String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do'
                           ? 'Todo'
                           : f.name}
