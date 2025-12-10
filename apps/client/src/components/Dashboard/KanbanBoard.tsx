@@ -91,13 +91,13 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     <>
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="kanban-scroll-container h-100 px-2" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-          <Row className="flex-nowrap" style={{ width: 'max-content', minWidth: '100%', height: '100%' }}>
+          <Row className="flex-nowrap" style={{ minWidth: '100%', height: '100%' }}>
             {KANBAN_COLUMNS.map((col) => (
               <Col 
                 key={col.id} 
-                md={3} // Giảm độ rộng cột một chút để vừa 4 cột
+                md={3}
                 className="d-flex flex-column"
-                style={{ minWidth: '270px' }}
+                style={{ width: '30%', minWidth: '300px', flex: '0 0 auto' }}
               >
                 <div className="p-3 mb-3 text-center rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid #c770f0' }}>
                   <h5 className="m-0 text-white">{col.title}</h5>
