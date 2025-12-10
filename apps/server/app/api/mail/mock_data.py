@@ -76,6 +76,22 @@ MOCK_MAILBOXES: List[Dict[str, Any]] = [
         "unread_count": 1,
         "total_count": 45,
         "custom": True
+    },
+    {
+        "id": "todo",
+        "name": "To Do",
+        "icon": "task", # Icon identifier
+        "unread_count": 1,
+        "total_count": 5,
+        "custom": True
+    },
+    {
+        "id": "done",
+        "name": "Done",
+        "icon": "check",
+        "unread_count": 0,
+        "total_count": 10,
+        "custom": True
     }
 ]
 
@@ -310,14 +326,20 @@ MOCK_THREADS: Dict[str, Dict[str, Any]] = {
 
 # Thread list items for mailbox views (lightweight representation)
 # This is what gets returned by GET /mailboxes/:id/emails
+# apps/server/app/api/mail/mock_data.py
+
+# Thread list items for mailbox views (lightweight representation)
 MOCK_THREAD_LIST: Dict[str, List[Dict[str, Any]]] = {
     "inbox": [
         {"id": "thread_001", "history_id": "12345"},
         {"id": "thread_002", "history_id": "12346"},
-        {"id": "thread_003", "history_id": "12347"},
         {"id": "thread_004", "history_id": "12348"},
         {"id": "thread_005", "history_id": "12349"},
     ],
+    "todo": [
+        {"id": "thread_003", "history_id": "12347"}, 
+    ],
+    "done": [],
     "starred": [
         {"id": "thread_003", "history_id": "12347"},
     ],
@@ -325,7 +347,6 @@ MOCK_THREAD_LIST: Dict[str, List[Dict[str, Any]]] = {
     "drafts": [],
     "work": [
         {"id": "thread_001", "history_id": "12345"},
-        {"id": "thread_003", "history_id": "12347"},
     ],
     "personal": [
         {"id": "thread_005", "history_id": "12349"},
@@ -408,8 +429,7 @@ def get_email_by_id(thread_id: str) -> Optional[Dict[str, Any]]:
 
 def update_email(thread_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    Update thread properties (unread, starred, labels).
-    In this mock implementation, we update the latest message's properties.
+    Update thread properties and MOVE thread between lists if labels are changed.
     """
     thread = MOCK_THREADS.get(thread_id)
     if not thread:
@@ -421,26 +441,44 @@ def update_email(thread_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, 
     if "unread" in updates:
         latest["unread"] = updates["unread"]
     
-    # Update starred (in tags)
+    # Update starred
     if "starred" in updates:
         tags = latest["tags"]
-        starred_tag = {"id": "starred", "name": "starred", "type": "system"}
-        
         if updates["starred"]:
             if not any(t["id"] == "starred" for t in tags):
-                tags.append(starred_tag)
+                tags.append({"id": "starred", "name": "starred", "type": "system"})
         else:
             latest["tags"] = [t for t in tags if t["id"] != "starred"]
     
-    # Update labels
+    # LOGIC MỚI: Update labels và Di chuyển giữa các cột (MOCK_THREAD_LIST)
     if "labels" in updates:
-        new_labels = [
-            {"id": label, "name": label, "type": "user" if label not in ["inbox", "sent", "starred", "trash"] else "system"} 
-            for label in updates["labels"]
-        ]
-        latest["tags"] = new_labels
-        thread["labels"] = [{"id": l, "name": l} for l in updates["labels"]]
-    
+        new_labels = updates["labels"] # Ví dụ: ["done"]
+        
+        # 1. Cập nhật metadata trong chi tiết email
+        latest["tags"] = [{"id": l, "name": l, "type": "user"} for l in new_labels]
+        thread["labels"] = [{"id": l, "name": l} for l in new_labels]
+
+        # 2. DI CHUYỂN EMAIL TRONG MOCK_THREAD_LIST
+        # Bước A: Xóa email khỏi TẤT CẢ các danh sách cột (inbox, todo, done) để tránh trùng lặp
+        kanban_columns = ["inbox", "todo", "done"]
+        for col in kanban_columns:
+            if col in MOCK_THREAD_LIST:
+                MOCK_THREAD_LIST[col] = [t for t in MOCK_THREAD_LIST[col] if t["id"] != thread_id]
+        
+        # Bước B: Thêm email vào danh sách cột mới
+        for label in new_labels:
+            target_col = label.lower()
+            # Chỉ thêm nếu nhãn đó là một cột hợp lệ trong Kanban
+            if target_col in kanban_columns:
+                if target_col not in MOCK_THREAD_LIST:
+                    MOCK_THREAD_LIST[target_col] = []
+                
+                # Thêm vào đầu danh sách
+                MOCK_THREAD_LIST[target_col].insert(0, {
+                    "id": thread_id,
+                    "history_id": thread.get("history_id", "12345")
+                })
+
     return get_email_by_id(thread_id)
 
 

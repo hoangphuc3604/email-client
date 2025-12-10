@@ -28,9 +28,13 @@ import {
   FaFileArchive,
   FaPen,
   FaDownload,
+  FaClock,
+  FaTasks,
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
+import { BsKanban, BsListUl } from 'react-icons/bs'; 
+import KanbanBoard from './KanbanBoard'; 
 
 // Map Gmail label IDs to friendly names
 const LABEL_NAME_MAP: Record<string, string> = {
@@ -39,10 +43,10 @@ const LABEL_NAME_MAP: Record<string, string> = {
   'SENT': 'Sent',
   'DRAFT': 'Drafts',
   'TRASH': 'Trash',
+  'SNOOZED': 'Snoozed',
+  'TODO': 'Todo',
+  'DONE': 'Done',
 }
-
-// Gmail system labels we want to display
-const ESSENTIAL_LABELS = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH']
 
 function timeAgo(ts: number) {
   const s = Math.floor((Date.now() - ts) / 1000)
@@ -56,8 +60,8 @@ export default function Dashboard() {
   const [selectedFolder, setSelectedFolder] = useState('inbox')
   const [selectedEmail, setSelectedEmail] = useState<any | null>(null)
   const [mailboxes, setMailboxes] = useState<any[]>([])
+  const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [previewsMap, setPreviewsMap] = useState<Record<string, any[]>>(() => {
-    // Load from localStorage on mount
     try {
       const saved = localStorage.getItem('email_previews_map')
       return saved ? JSON.parse(saved) : {}
@@ -84,7 +88,6 @@ export default function Dashboard() {
   const scrollStartRef = useRef(0)
   const INITIAL_LOAD_COUNT = 20
 
-  // Save previewsMap to localStorage whenever it changes
   useEffect(() => {
     try {
       localStorage.setItem('email_previews_map', JSON.stringify(previewsMap))
@@ -97,10 +100,8 @@ export default function Dashboard() {
     return previewsMap[selectedFolder] || []
   }, [previewsMap, selectedFolder])
 
-  // Restore scroll position after loading more emails
   useEffect(() => {
     if (loadingMore === false && scrollTopRef.current > 0 && listRef.current) {
-      // Use setTimeout to ensure DOM has fully updated
       setTimeout(() => {
         if (listRef.current && scrollTopRef.current > 0) {
           listRef.current.scrollTop = scrollTopRef.current
@@ -121,9 +122,6 @@ export default function Dashboard() {
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
-    
-    // If folder needs reload or hasn't been loaded yet, load it
-    // Don't trigger loading state for mailbox list
     if (!loadedFolders.has(id) || foldersNeedReload.has(id)) {
       loadFolderData(id, true)
     }
@@ -134,7 +132,6 @@ export default function Dashboard() {
       setLoading(true)
     } else {
       setLoadingMore(true)
-      // Save scroll position BEFORE loading more
       if (listRef.current) {
         scrollTopRef.current = listRef.current.scrollTop
       }
@@ -151,13 +148,11 @@ export default function Dashboard() {
         [folderId]: isInitial ? previews : [...(prev[folderId] || []), ...previews]
       }))
       
-      // Store page token for next load
       setPageTokenMap((prev) => ({
         ...prev,
         [folderId]: nextPageToken || null
       }))
       
-      // Track if there are more emails to load
       setHasMoreMap((prev) => ({
         ...prev,
         [folderId]: !!nextPageToken
@@ -192,7 +187,6 @@ export default function Dashboard() {
     const scrollPosition = target.scrollTop + target.clientHeight
     const scrollHeight = target.scrollHeight
     
-    // Load more when scrolled to 80% of the list
     if (scrollPosition >= scrollHeight * 0.8 && !loadingMore && !loading) {
       const hasMore = hasMoreMap[selectedFolder]
       if (hasMore) {
@@ -201,10 +195,8 @@ export default function Dashboard() {
     }
   }
 
-  // Mouse drag scrolling handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!listRef.current) return
-    
     isDraggingRef.current = true
     startYRef.current = e.clientY
     scrollStartRef.current = listRef.current.scrollTop
@@ -214,8 +206,6 @@ export default function Dashboard() {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isDraggingRef.current || !listRef.current) return
-    
-    // If we've moved more than 5 pixels, it's a drag not a click
     const deltaY = Math.abs(startYRef.current - e.clientY)
     if (deltaY > 5) {
       e.preventDefault()
@@ -243,19 +233,46 @@ export default function Dashboard() {
     setLoadingMailboxes(true)
     try {
       const data = await mailApi.listMailboxes()
-      // Filter to only show essential system labels (Gmail standard labels)
-      const filtered = (data || []).filter((box: any) => 
-        ESSENTIAL_LABELS.includes(String(box.id).toUpperCase())
-      ).map((box: any) => ({
-        ...box,
-        id: String(box.id).toLowerCase(), // normalize to lowercase for UI
-        name: LABEL_NAME_MAP[String(box.id).toUpperCase()] || box.name,
-        unreadCount: box.unread_count || 0
-      }))
+      const filtered = (data || []).filter((box: any) => {
+        const idUpper = String(box.id).toUpperCase()
+        const nameUpper = String(box.name || '').toUpperCase()
+
+        const isSystem = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(idUpper) || ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(nameUpper)
+        const isSnoozed = idUpper === 'SNOOZED' || nameUpper === 'SNOOZED'
+        const isTodo = idUpper === 'TODO' || nameUpper === 'TODO' || nameUpper === 'TO DO'
+        const isDone = idUpper === 'DONE' || nameUpper === 'DONE'
+
+        return isSystem || isSnoozed || isTodo || isDone
+      }).map((box: any) => {
+        const idUpper = String(box.id).toUpperCase()
+        const nameUpper = String(box.name || '').toUpperCase()
+        let displayName = LABEL_NAME_MAP[idUpper] || box.name
+        let normalizedId = String(box.id).toLowerCase()
+
+        console.log('Mailbox:', box.id, box.name, '->', displayName);
+        
+        // Normalize IDs and display names for custom labels
+        if (nameUpper === 'TODO' || nameUpper === 'TO DO') {
+          normalizedId = 'todo'
+          displayName = 'Todo'
+        } else if (nameUpper === 'DONE') {
+          normalizedId = 'done'
+          displayName = 'Done'
+        } else if (nameUpper === 'SNOOZED') {
+          normalizedId = 'snoozed'
+          displayName = 'Snoozed'
+        }
+        
+        return {
+          ...box,
+          id: normalizedId,
+          name: displayName,
+          unreadCount: box.unread_count || 0
+        }
+      })
       setMailboxes(filtered.length > 0 ? filtered : [])
       setLoadingMailboxes(false)
       
-      // Only load Inbox on initial load for performance
       const inboxId = 'inbox'
       await loadFolderData(inboxId, true)
     } catch (e) {
@@ -267,33 +284,21 @@ export default function Dashboard() {
 
   async function openEmail(email: any) {
     setLoadingEmail(true)
-    // fetch full thread/detail from backend
     try {
       const data = await mailApi.getEmail(email.id)
       console.log('Email detail response:', data)
-      // Backend returns { messages: [...], latest: {...}, ... }
-      // Use the latest message for display, or first message if no latest
       const message = data.latest || data.messages?.[0] || data
       const senderStr = typeof message.sender === 'string' 
         ? message.sender 
         : (message.sender?.name || message.sender?.email || 'Unknown')
       
-      // Find the actual message ID - it could be in different places
       const actualMessageId = message.id || message.message_id || email.id
-      console.log('Message IDs:', { 
-        messageId: message.id, 
-        message_id: message.message_id, 
-        emailId: email.id,
-        actualMessageId,
-        attachments: message.attachments 
-      })
       
       setSelectedEmail({
         ...message,
-        id: email.id, // Keep the original preview ID for consistency
-        messageId: actualMessageId, // Store the actual message ID for attachments
+        id: email.id, 
+        messageId: actualMessageId, 
         sender: senderStr,
-        // Use processed_html if available, otherwise body
         body: message.processed_html || message.body || message.decoded_body || '',
         subject: message.subject || message.title || '(No Subject)',
         to: message.to || [],
@@ -301,7 +306,6 @@ export default function Dashboard() {
         attachments: message.attachments || []
       })
       
-      // Mark as read on backend if it was unread
       if (email.unread) {
         try {
           await mailApi.modifyEmail(email.id, { unread: false })
@@ -311,7 +315,6 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Error loading email:', err)
-      // fallback to using the preview item as detail
       const senderStr = typeof email.sender === 'string'
         ? email.sender
         : (email.sender?.name || email.sender?.email || 'Unknown')
@@ -325,7 +328,6 @@ export default function Dashboard() {
       setLoadingEmail(false)
     }
     
-    // Mark as read locally by updating in all folders
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       Object.keys(updated).forEach(folder => {
@@ -336,21 +338,18 @@ export default function Dashboard() {
       return updated
     })
     
-    // Check if this is a draft email and open compose instead
     if (selectedFolder === 'drafts' || (email.labels && email.labels.includes('drafts'))) {
-      // Load draft into compose form
       setComposeTo(email.to?.[0]?.email || '')
       setComposeSubject(email.subject || '')
       setComposeBody(email.body || email.preview || '')
       setShowCompose(true)
       
-      // Remove draft from drafts folder since we're editing it
       setPreviewsMap((prev) => ({
         ...prev,
         drafts: (prev['drafts'] || []).filter((e: any) => e.id !== email.id)
       }))
       
-      return // Don't set selectedEmail for drafts
+      return 
     }
     
     setMobileView('detail')
@@ -370,12 +369,9 @@ export default function Dashboard() {
     const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
     if (ids.size === 0) return
     
-    // Check if we're deleting from trash - if so, permanently delete
     if (selectedFolder === 'trash') {
-      // Permanently delete from system
       setPreviewsMap((prev) => {
         const updated = { ...prev }
-        // Remove from all folders permanently
         Object.keys(updated).forEach(folder => {
           updated[folder] = updated[folder].filter((e: any) => !ids.has(String(e.id)))
         })
@@ -387,21 +383,17 @@ export default function Dashboard() {
       return
     }
     
-    // Call backend API for each selected email to move to trash
     const promises = Array.from(ids).map(id => 
       mailApi.modifyEmail(id, { trash: true })
         .catch(err => console.error(`Failed to delete email ${id}:`, err))
     )
     
-    // Wait for all backend calls to complete (fire and forget style)
     Promise.all(promises).catch(() => {})
     
-    // Move emails to trash locally by updating previewsMap
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       const movedEmails: any[] = []
       
-      // Remove from current folder and collect emails
       Object.keys(updated).forEach(folder => {
         const emails = updated[folder]
         const remaining: any[] = []
@@ -415,7 +407,6 @@ export default function Dashboard() {
         updated[folder] = remaining
       })
       
-      // Add to trash folder
       updated['trash'] = [...(updated['trash'] || []), ...movedEmails]
       
       return updated
@@ -426,51 +417,30 @@ export default function Dashboard() {
   }
 
   async function downloadAttachment(attachment: any) {
-    // Download attachment from backend
     if (!selectedEmail) return
     
-    console.log('Full attachment object:', attachment)
-    console.log('Selected email:', { 
-      id: selectedEmail.id, 
-      messageId: selectedEmail.messageId,
-      attachments: selectedEmail.attachments 
-    })
-    
-    // Get the correct attachment ID - could be attachment_id or attachmentId
     const attachmentId = attachment.attachment_id || attachment.attachmentId
     
     if (!attachmentId) {
-      console.error('Attachment ID is missing:', attachment)
       alert('Cannot download attachment: ID is missing. Please try refreshing the email.')
       return
     }
     
-    // Use the message ID from the attachment itself (most accurate)
-    // Fallback to selectedEmail's messageId, then email id
     const messageId = attachment.messageId || attachment.message_id || selectedEmail.messageId || selectedEmail.id
     
     if (!messageId) {
-      console.error('Message ID is missing from attachment and selectedEmail')
       alert('Cannot download attachment: Message ID is missing. Please try refreshing the email.')
       return
     }
     
     try {
-      console.log('Downloading attachment:', { messageId, attachmentId, filename: attachment.filename || attachment.name })
-      // Get the blob from the backend
       const blob = await mailApi.downloadAttachment(messageId, attachmentId)
-      
-      // Create a temporary URL for the blob
       const url = window.URL.createObjectURL(blob)
-      
-      // Create a temporary link element and trigger download
       const link = document.createElement('a')
       link.href = url
       link.download = attachment.filename || attachment.name || 'attachment'
       document.body.appendChild(link)
       link.click()
-      
-      // Clean up
       document.body.removeChild(link)
       window.URL.revokeObjectURL(url)
     } catch (error) {
@@ -483,14 +453,10 @@ export default function Dashboard() {
     if (!selectedEmail) return
     
     const emailId = String(selectedEmail.id)
-    console.log('Deleting email with ID:', emailId, 'from folder:', selectedFolder)
     
-    // Check if we're deleting from trash - if so, permanently delete
     if (selectedFolder === 'trash') {
-      // Permanently delete from system
       setPreviewsMap((prev) => {
         const updated = { ...prev }
-        // Remove from all folders permanently
         Object.keys(updated).forEach(folder => {
           updated[folder] = updated[folder].filter((e: any) => String(e.id) !== emailId)
         })
@@ -502,26 +468,19 @@ export default function Dashboard() {
       return
     }
     
-    // Try backend
     try {
       mailApi.modifyEmail(emailId, { labels: ['trash'] }).catch(() => {})
     } catch (e) {}
     
-    // Move email to trash locally - same logic as deleteSelected
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       const movedEmails: any[] = []
       
-      console.log('Before delete, folders:', Object.keys(updated))
-      console.log('Inbox before:', updated['inbox']?.map((e: any) => e.id))
-      
-      // Remove from all folders and collect the email
       Object.keys(updated).forEach(folder => {
         const emails = updated[folder] || []
         const remaining: any[] = []
         emails.forEach((e: any) => {
           if (String(e.id) === emailId) {
-            console.log(`Found email ${emailId} in folder ${folder}`)
             movedEmails.push({ ...e, labels: ['trash'] })
           } else {
             remaining.push(e)
@@ -530,10 +489,6 @@ export default function Dashboard() {
         updated[folder] = remaining
       })
       
-      console.log('Moved emails:', movedEmails.length)
-      console.log('Inbox after:', updated['inbox']?.map((e: any) => e.id))
-      
-      // Add to trash folder
       updated['trash'] = [...(updated['trash'] || []), ...movedEmails]
       
       return updated
@@ -547,16 +502,13 @@ export default function Dashboard() {
     const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
     if (ids.size === 0) return
     
-    // Call backend API for each selected email
     const promises = Array.from(ids).map(id => 
       mailApi.modifyEmail(id, { unread: !makeRead })
         .catch(err => console.error(`Failed to mark email ${id} as ${makeRead ? 'read' : 'unread'}:`, err))
     )
     
-    // Wait for all backend calls to complete (fire and forget style)
     Promise.all(promises).catch(() => {})
     
-    // Update locally in all folders immediately for UI responsiveness
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       Object.keys(updated).forEach(folder => {
@@ -573,12 +525,8 @@ export default function Dashboard() {
   async function toggleStar(email: any) {
     const hasStar = (email.labels || []).includes('starred') || (email.labels || []).includes('STARRED')
     
-    // Call backend API in background
     try {
       await mailApi.modifyEmail(email.id, { starred: !hasStar })
-      console.log(`Successfully ${hasStar ? 'unstarred' : 'starred'} email ${email.id}`)
-      
-      // Refresh the current folder to show updated starred status
       await refreshFolder()
     } catch (e) {
       console.error('Failed to toggle star on backend:', e)
@@ -587,18 +535,13 @@ export default function Dashboard() {
   }
   
   async function refreshFolder() {
-    // Refresh only the current folder
     setSelectedEmail(null)
     setSelectedIds({})
     setMobileView('list')
-    
-    // Reset page token to start from beginning
     setPageTokenMap((prev) => ({
       ...prev,
       [selectedFolder]: null
     }))
-    
-    // Load fresh data - only refresh email list, not mailbox list
     await loadFolderData(selectedFolder, true)
   }
 
@@ -618,9 +561,6 @@ export default function Dashboard() {
   const [replyingToId, setReplyingToId] = useState<string | null>(null)
 
   function handleReply(email: any) {
-    console.log('[Reply] Opening reply modal for email:', email?.id, email)
-    
-    // Populate reply fields
     const senderEmail = typeof email.sender === 'string' 
       ? email.sender 
       : (email.sender?.email || 'unknown@example.com')
@@ -630,8 +570,6 @@ export default function Dashboard() {
     setReplyBody(`\n\n--- Original Message ---\nFrom: ${email.sender}\nSubject: ${email.subject || '(no subject)'}\n\n`)
     setReplyingToId(email.id)
     setShowReply(true)
-    
-    console.log('[Reply] Modal should now be visible. showReply:', true)
   }
 
   async function handleCloseReply() {
@@ -654,10 +592,8 @@ export default function Dashboard() {
           setReplyingToId(null)
 
           alert('Draft saved successfully!')
-          // Refresh folder immediately to show draft
           await refreshFolder()
         } catch (e: any) {
-          console.error('Failed to save draft:', e)
           alert(`Failed to save draft: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
           return
         }
@@ -683,7 +619,6 @@ export default function Dashboard() {
     }
     
     try {
-      // Use the reply API endpoint instead of send
       await mailApi.replyEmail(replyingToId, {
         to: replyTo,
         subject: replySubject || '(no subject)',
@@ -703,13 +638,11 @@ export default function Dashboard() {
       await refreshFolder()
       
     } catch (e: any) {
-      console.error('Failed to send reply:', e)
       alert(`Failed to send reply: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
     }
   }
 
   async function handleCloseCompose() {
-    // Check if there's unsaved content
     if (composeTo || composeCc || composeBcc || composeSubject || composeBody || composeAttachments.length > 0) {
       const saveToDraft = confirm('Save this email to drafts before closing?')
       if (saveToDraft) {
@@ -732,11 +665,9 @@ export default function Dashboard() {
           setComposeAttachments([])
           setShowCcBcc(false)
 
-          // Refresh folder immediately to show draft
           alert('Draft saved successfully!')
           await refreshFolder()
         } catch (e: any) {
-          console.error('Failed to save draft:', e)
           alert(`Failed to save draft: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
           return
         }
@@ -760,7 +691,6 @@ export default function Dashboard() {
     }
     
     try {
-      // Actually send via Gmail API and wait for response
       await mailApi.sendEmail({ 
         to: composeTo, 
         cc: composeCc || undefined,
@@ -770,7 +700,6 @@ export default function Dashboard() {
         attachments: composeAttachments.length > 0 ? composeAttachments : undefined
       })
       
-      // Close compose window after successful send
       setShowCompose(false)
       setComposeTo('')
       setComposeCc('')
@@ -781,11 +710,9 @@ export default function Dashboard() {
       setShowCcBcc(false)
       
       alert('Email sent successfully!')
-      // Silently refresh in background
       await refreshFolder()
       
     } catch (e: any) {
-      console.error('Failed to send email:', e)
       alert(`Failed to send email: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
     }
   }
@@ -824,13 +751,130 @@ export default function Dashboard() {
     }
   }, [])
 
+  // ------ Render Component Content Helper ------
+  const renderEmailDetail = () => {
+    if (!selectedEmail) return null;
+    return (
+      <Card className="email-detail-card h-100">
+        <Card.Header className="d-flex align-items-center">
+          <div className="me-2">
+            <Button variant="outline-secondary" size="sm" onClick={() => handleReply(selectedEmail)}>
+              <FaReply />
+            </Button>
+            <Button variant="outline-secondary" size="sm" className="ms-1" onClick={() => { /* forward mock */ }}>
+              <FaForward />
+            </Button>
+          </div>
+          <div className="ms-auto d-flex align-items-center">
+            {/* Back button logic: clears selectedEmail, returning to list or board */}
+            <Button variant="outline-secondary" size="sm" onClick={() => { setSelectedEmail(null); setMobileView('list') }} className="me-2">
+              Back
+            </Button>
+            <Button variant="outline-danger" size="sm" onClick={deleteCurrentEmail}>
+              <FaTrash />
+            </Button>
+          </div>
+        </Card.Header>
+        <Card.Body className="d-flex flex-column" style={{ overflowY: 'auto' }}>
+          <Card.Title>{selectedEmail.subject}</Card.Title>
+          <Card.Subtitle className="mb-2 text-muted">
+            <div><strong>From:</strong> {selectedEmail.sender}</div>
+            {selectedEmail.to && selectedEmail.to.length > 0 && (
+              <div><strong>To:</strong> {selectedEmail.to.map((t: any) => t.name || t.email).join(', ')}</div>
+            )}
+            {selectedEmail.cc && selectedEmail.cc.length > 0 && (
+              <div><strong>Cc:</strong> {selectedEmail.cc.map((c: any) => c.name || c.email).join(', ')}</div>
+            )}
+          </Card.Subtitle>
+          <hr />
+          <div className="email-body-container flex-grow-1">
+            <iframe
+              ref={(iframe) => {
+                if (iframe) {
+                  const resizeIframe = () => {
+                    try {
+                      const doc = iframe.contentDocument || iframe.contentWindow?.document
+                      if (doc && doc.body) {
+                        const height = doc.body.scrollHeight
+                        iframe.style.height = Math.max(height + 32, 300) + 'px'
+                      }
+                    } catch (e) {}
+                  }
+                  iframe.onload = resizeIframe
+                  setTimeout(resizeIframe, 100)
+                }
+              }}
+              srcDoc={`
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <meta charset="utf-8">
+                    <style>
+                      body {
+                        margin: 0;
+                        padding: 16px;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+                        font-size: 14px;
+                        line-height: 1.5;
+                        color: #333;
+                        background: transparent;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
+                      }
+                      img { max-width: 100%; height: auto; }
+                      a { color: #0066cc; }
+                      pre { white-space: pre-wrap; }
+                      table { border-collapse: collapse; }
+                    </style>
+                  </head>
+                  <body>${selectedEmail.body}</body>
+                </html>
+              `}
+              style={{
+                width: '100%',
+                minHeight: '300px',
+                border: 'none',
+                backgroundColor: 'white',
+                display: 'block'
+              }}
+              sandbox="allow-same-origin"
+              title="Email content"
+            />
+          </div>
+
+          {selectedEmail.attachments && selectedEmail.attachments.length > 0 && (
+            <div className="attachments mt-3">
+              <h6>Attachments ({selectedEmail.attachments.length})</h6>
+              <div className="d-flex flex-wrap gap-2">
+                {selectedEmail.attachments.map((a: any, i: number) => (
+                  <Button
+                    key={i}
+                    variant="outline-primary"
+                    size="sm"
+                    onClick={() => downloadAttachment(a)}
+                    className="d-flex align-items-center"
+                  >
+                    <FaDownload className="me-2" />
+                    {a.filename || a.name}
+                    <small className="ms-2 text-muted">({Math.round((a.size || 0) / 1024)} KB)</small>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card.Body>
+      </Card>
+    );
+  };
+  // ---------------------------------------------
+
   return (
     <Container fluid className="dashboard-section">
       <Particle />
       <Container className="dashboard-container">
         <Row className="dashboard-row">
           <Col md={2} className={`folder-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
-            <div className="folders-header">
+            <div className="folders-header pt-3">
               <h5>Mailboxes</h5>
             </div>
 
@@ -850,7 +894,12 @@ export default function Dashboard() {
                         {String(f.id).toLowerCase() === 'draft' && <FaPen className="me-2" />}
                         {String(f.id).toLowerCase() === 'archive' && <FaFileArchive className="me-2" />}
                         {String(f.id).toLowerCase() === 'trash' && <FaTrash className="me-2" />}
-                        {f.name}
+                        {(String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do') && <FaTasks className="me-2" />}
+                        {(String(f.id).toLowerCase() === 'snoozed' || String(f.name || '').toLowerCase() === 'snoozed') && <FaClock className="me-2" />}
+                        {String(f.id).toLowerCase() === 'done' && <FaCheckSquare className="me-2" />}
+                        {String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do'
+                          ? 'Todo'
+                          : f.name}
                       </div>
                       {String(f.id).toLowerCase() === 'inbox' && unreadInboxCount > 0 && (
                         <Badge bg="danger">{unreadInboxCount}</Badge>
@@ -862,8 +911,45 @@ export default function Dashboard() {
             </ListGroup>
           </Col>
 
+          {/* Logic Render View (Kanban vs List) */}
+          {viewMode === 'kanban' ? (
+            <Col md={10} className="h-100 d-flex flex-column">
+              {/* Nếu đã chọn email thì hiển thị chi tiết email, ngược lại hiển thị Board */}
+              {selectedEmail ? (
+                 <div className="h-100 p-3" style={{ overflow: 'hidden' }}>
+                    {renderEmailDetail()}
+                 </div>
+              ) : (
+                <>
+                  <div className="email-list-actions d-flex align-items-center justify-content-between mb-2">
+                    <h5 className="m-0 text-white">Project Board</h5>
+                    <Button 
+                      variant="outline-info" 
+                      onClick={() => setViewMode('list')}
+                      className="d-flex align-items-center gap-2"
+                    >
+                      <BsListUl /> Back to List
+                    </Button>
+                  </div>
+                  <div className="flex-grow-1" style={{ overflow: 'auto', height: '100%' }}>
+                    <KanbanBoard onOpenEmail={(email) => openEmail(email)} />
+                  </div>
+                </>
+              )}
+            </Col>
+          ) : (
+            <>
           <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
             <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
+              <OverlayTrigger placement="bottom" overlay={<Tooltip>Switch View</Tooltip>}>
+                <Button 
+                  variant="outline-info" 
+                  className="me"
+                  onClick={() => setViewMode(viewMode === 'list' ? 'kanban' : 'list')}
+                >
+                  {viewMode === 'list' ? <BsKanban /> : <BsListUl />}
+                </Button>
+              </OverlayTrigger>
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Compose</Tooltip>}>
                 <Button variant="primary" onClick={() => setShowCompose(true)} aria-label="Compose">
                   <BiEdit />
@@ -928,7 +1014,6 @@ export default function Dashboard() {
                         action
                         className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
                         onClick={(e) => {
-                          // Don't open email if we were dragging to scroll
                           if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
                             return
                           }
@@ -982,121 +1067,15 @@ export default function Dashboard() {
                 <p>Select an email to view details</p>
               </div>
             ) : (
-              <Card className="email-detail-card">
-                <Card.Header className="d-flex align-items-center">
-                  <div className="me-2">
-                    <Button variant="outline-secondary" size="sm" onClick={() => handleReply(selectedEmail)}>
-                      <FaReply />
-                    </Button>
-                    <Button variant="outline-secondary" size="sm" className="ms-1" onClick={() => { /* forward mock */ }}>
-                      <FaForward />
-                    </Button>
-                  </div>
-                  <div className="ms-auto d-flex align-items-center">
-                    <Button variant="outline-secondary" size="sm" onClick={() => { setSelectedEmail(null); setMobileView('list') }} className="me-2">
-                      Back
-                    </Button>
-                    <Button variant="outline-danger" size="sm" onClick={deleteCurrentEmail}>
-                      <FaTrash />
-                    </Button>
-                  </div>
-                </Card.Header>
-                <Card.Body>
-                  <Card.Title>{selectedEmail.subject}</Card.Title>
-                  <Card.Subtitle className="mb-2 text-muted">
-                    <div><strong>From:</strong> {selectedEmail.sender}</div>
-                    {selectedEmail.to && selectedEmail.to.length > 0 && (
-                      <div><strong>To:</strong> {selectedEmail.to.map((t: any) => t.name || t.email).join(', ')}</div>
-                    )}
-                    {selectedEmail.cc && selectedEmail.cc.length > 0 && (
-                      <div><strong>Cc:</strong> {selectedEmail.cc.map((c: any) => c.name || c.email).join(', ')}</div>
-                    )}
-                  </Card.Subtitle>
-                  <hr />
-                  <div className="email-body-container">
-                    <iframe
-                      ref={(iframe) => {
-                        if (iframe) {
-                          const resizeIframe = () => {
-                            try {
-                              const doc = iframe.contentDocument || iframe.contentWindow?.document
-                              if (doc && doc.body) {
-                                const height = doc.body.scrollHeight
-                                iframe.style.height = Math.max(height + 32, 300) + 'px'
-                              }
-                            } catch (e) {
-                              // ignore cross-origin errors
-                            }
-                          }
-                          iframe.onload = resizeIframe
-                          setTimeout(resizeIframe, 100)
-                        }
-                      }}
-                      srcDoc={`
-                        <!DOCTYPE html>
-                        <html>
-                          <head>
-                            <meta charset="utf-8">
-                            <style>
-                              body {
-                                margin: 0;
-                                padding: 16px;
-                                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
-                                font-size: 14px;
-                                line-height: 1.5;
-                                color: #333;
-                                background: transparent;
-                                word-wrap: break-word;
-                                overflow-wrap: break-word;
-                              }
-                              img { max-width: 100%; height: auto; }
-                              a { color: #0066cc; }
-                              pre { white-space: pre-wrap; }
-                              table { border-collapse: collapse; }
-                            </style>
-                          </head>
-                          <body>${selectedEmail.body}</body>
-                        </html>
-                      `}
-                      style={{
-                        width: '100%',
-                        minHeight: '300px',
-                        border: 'none',
-                        backgroundColor: 'white',
-                        display: 'block'
-                      }}
-                      sandbox="allow-same-origin"
-                      title="Email content"
-                    />
-                  </div>
-
-                  {selectedEmail.attachments && selectedEmail.attachments.length > 0 && (
-                    <div className="attachments mt-3">
-                      <h6>Attachments ({selectedEmail.attachments.length})</h6>
-                      <div className="d-flex flex-wrap gap-2">
-                        {selectedEmail.attachments.map((a: any, i: number) => (
-                          <Button
-                            key={i}
-                            variant="outline-primary"
-                            size="sm"
-                            onClick={() => downloadAttachment(a)}
-                            className="d-flex align-items-center"
-                          >
-                            <FaDownload className="me-2" />
-                            {a.filename || a.name}
-                            <small className="ms-2 text-muted">({Math.round((a.size || 0) / 1024)} KB)</small>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </Card.Body>
-              </Card>
+              renderEmailDetail() // Sử dụng lại hàm render
             )}
           </Col>
+          </>
+          )}
         </Row>
       </Container>
 
+      {/* Modals Compose & Reply (Giữ nguyên) */}
       <Modal show={showCompose} onHide={handleCloseCompose} size="lg">
         <Modal.Header closeButton>
           <Modal.Title>Compose</Modal.Title>

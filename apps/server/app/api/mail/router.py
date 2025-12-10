@@ -6,6 +6,7 @@ from app.api.auth.dependencies import get_current_user
 from app.api.auth.models import UserInfo
 from app.api.mail.service import MailService
 from app.api.mail.dependencies import get_mail_service
+from app.api.mail.models import SnoozeEmailRequest
 
 logger = logging.getLogger(__name__)
 from app.api.mail.models import (
@@ -38,11 +39,12 @@ async def get_emails(
     mailbox_id: str,
     page_token: str = Query(None, description="Page token for pagination"),
     limit: int = Query(50, ge=1, le=100, description="Items per page"),
+    summarize: bool = Query(False, description="If true, include AI summary"),
     mail_service: MailService = Depends(get_mail_service),
     current_user: UserInfo = Depends(get_current_user)
 ):
     """Get paginated thread list for a mailbox. Returns lightweight thread IDs with historyIds."""
-    result = await mail_service.get_emails(current_user.id, mailbox_id, page_token, limit)
+    result = await mail_service.get_emails(current_user.id, mailbox_id, page_token, limit, summarize)
     return APIResponse(data=result, message="Emails retrieved successfully")
 
 
@@ -50,11 +52,12 @@ async def get_emails(
 async def get_email_detail(
     email_id: str,
     mail_service: MailService = Depends(get_mail_service),
-    current_user: UserInfo = Depends(get_current_user)
+    current_user: UserInfo = Depends(get_current_user),
+    summarize: bool = Query(False, description="If true, include AI summary")
 ):
     """Get full thread detail with all messages and metadata."""
     try:
-        email_detail = await mail_service.get_email_detail(current_user.id, email_id)
+        email_detail = await mail_service.get_email_detail(current_user.id, email_id, summarize)
         return APIResponse(data=email_detail, message="Email retrieved successfully")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -310,3 +313,34 @@ async def get_attachment(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to download attachment: {str(e)}")
+
+
+@router.post("/emails/{email_id}/summarize", response_model=APIResponse[dict])
+async def summarize_email(
+    email_id: str,
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Summarize a single email on demand."""
+    try:
+        result = await mail_service.summarize_email(current_user.id, email_id)
+        return APIResponse(data=result, message="Summary generated successfully")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to summarize email: {str(e)}")
+
+
+@router.post("/emails/{email_id}/snooze", response_model=APIResponse[dict])
+async def snooze_email_endpoint(
+    email_id: str,
+    payload: SnoozeEmailRequest,
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Snooze an email until a specific time."""
+    try:
+        result = await mail_service.snooze_email(current_user.id, email_id, payload.snooze_until)
+        return APIResponse(data=result, message="Email snoozed successfully")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

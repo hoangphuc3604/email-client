@@ -88,9 +88,14 @@ class AuthService:
         user = await self.users_collection.find_one({"email": email})
         if not user:
             raise ValueError("Invalid email or password")
-        
+
+        # Guard for users created via Google or missing password hash
+        password_hash = user.get("password_hash")
+        if not password_hash:
+            raise ValueError("Account does not have a password. Please sign in with Google or set a password.")
+
         # Verify password
-        if not verify_password(user["password_hash"], password):
+        if not verify_password(password_hash, password):
             raise ValueError("Invalid email or password")
         
         tokens = await self._create_and_store_tokens(user)

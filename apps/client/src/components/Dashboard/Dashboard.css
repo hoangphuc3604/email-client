@@ -16,7 +16,7 @@
 
 /* Hàng (Row) chính chứa 3 cột */
 .dashboard-row {
-  height: 100%;
+  height: 103%;
   background-color: rgba(27, 26, 46, 0.8); /* Nền mờ */
   border-radius: 10px;
   overflow: hidden; /* Ngăn các cột tràn ra ngoài */
@@ -87,7 +87,7 @@
 /* High-contrast list rows */
 .email-list .list-group-item {
   background: #231e2b; /* deep dark row */
-  color: #ffffff; /* white text */
+  color: #0b3af4; /* white text */
   border: none;
   border-bottom: 1px solid rgba(255,255,255,0.04);
   cursor: pointer;
@@ -96,13 +96,13 @@
 }
 
 .email-list .list-group-item:hover {
-  background: #ffffff;
+  background: #fc10e0;
   color: #111;
 }
 
 /* clearer small text - all white */
 .email-list .sender { 
-  color: #ffffff; 
+  color: #0b3af4; 
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -147,7 +147,7 @@
 .email-list .list-group-item.cursor,
 .email-list .list-group-item.selected,
 .email-list .list-group-item:active {
-  background: #ffffff !important;
+  background: #d676f8 !important;
   color: #111 !important;
 }
 
@@ -275,4 +275,59 @@
 
 .fa-spin {
   animation: fa-spin 1s infinite linear;
+}
+
+/* Custom scrollbar styling for horizontal scroll */
+.kanban-scroll-container {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(199, 112, 240, 0.6) rgba(255, 255, 255, 0.05);
+}
+
+.kanban-scroll-container::-webkit-scrollbar {
+  height: 12px;
+}
+
+.kanban-scroll-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  margin: 0 10px;
+}
+
+.kanban-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(199, 112, 240, 0.6);
+  border-radius: 10px;
+  border: 2px solid rgba(27, 26, 46, 0.8);
+}
+
+.kanban-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(199, 112, 240, 0.9);
+}
+
+.custom-scrollbar::-webkit-scrollbar,
+div[style*="overflowX: 'auto'"]::-webkit-scrollbar,
+div[style*="overflow: auto"]::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track,
+div[style*="overflowX: 'auto'"]::-webkit-scrollbar-track,
+div[style*="overflow: auto"]::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb,
+div[style*="overflowX: 'auto'"]::-webkit-scrollbar-thumb,
+div[style*="overflow: auto"]::-webkit-scrollbar-thumb {
+  background: rgba(199, 112, 240, 0.5);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+div[style*="overflowX: 'auto'"]::-webkit-scrollbar-thumb:hover,
+div[style*="overflow: auto"]::-webkit-scrollbar-thumb:hover {
+  background: rgba(199, 112, 240, 0.8);
 }

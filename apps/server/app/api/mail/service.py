@@ -5,7 +5,8 @@ from app.utils.security import decrypt_token
 from app.config import settings
 from bson import ObjectId
 import email.utils
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional
 import base64
 import logging
 from email.mime.text import MIMEText
@@ -13,6 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import mimetypes
+
 
 logger = logging.getLogger(__name__)
 from app.api.mail.models import (
@@ -27,12 +29,20 @@ from app.api.mail.models import (
     Label,
     Attachment
 )
+from app.api.agents.summarizer import Summarizer
 
 class MailService:
   def __init__(self, db: Database):
     self.db = db
     self.users_collection = self.db["users"]
+    self.snoozed_collection = self.db["snoozed_emails"] # Collection mới để lưu trạng thái snooze
+    # Lazy init summarizer to avoid raising at import time when key is missing
+    self._summarizer: Optional[Summarizer] = None
 
+  def _get_summarizer(self) -> Summarizer:
+    if self._summarizer is None:
+      self._summarizer = Summarizer()
+    return self._summarizer
   async def get_gmail_service(self, user_id: str):
     user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
     if not user or "google_refresh_token" not in user:
@@ -67,18 +77,69 @@ class MailService:
       for label in labels
     ]
 
-  async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50):
+  async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
+    """
+    Lấy danh sách email từ Gmail dựa trên mailbox_id (nhãn).
+    Hàm này tự động phân giải tên nhãn (ví dụ: 'todo') sang Gmail Label ID thực tế (ví dụ: 'Label_234').
+    """
     service = await self.get_gmail_service(user_id)
     
-    # Gmail API requires uppercase label IDs
-    gmail_label = mailbox_id.upper()
+    # 1. Map các nhãn hệ thống của Gmail (Frontend dùng số nhiều/chữ thường -> Gmail dùng ID chuẩn)
+    system_labels_map = {
+        'inbox': 'INBOX',
+        'sent': 'SENT',
+        'trash': 'TRASH',
+        'drafts': 'DRAFT',  # Gmail dùng 'DRAFT' số ít
+        'spam': 'SPAM',
+        'starred': 'STARRED',
+        'important': 'IMPORTANT'
+    }
 
-    results = service.users().messages().list(
-      userId='me',
-      labelIds=[gmail_label],
-      maxResults=limit,
-      pageToken=page_token
-    ).execute()
+    # Lấy ID nếu là nhãn hệ thống
+    gmail_label_id = system_labels_map.get(mailbox_id.lower())
+
+    # 2. Nếu không phải nhãn hệ thống, tìm ID trong danh sách nhãn của người dùng
+    if not gmail_label_id:
+        try:
+            # Lấy danh sách tất cả nhãn hiện có trên Gmail của user
+            results = service.users().labels().list(userId='me').execute()
+            labels = results.get('labels', [])
+            
+            # Chuẩn hóa tên cần tìm: 'todo' -> 'to do' để khớp với Gmail nếu user đặt tên có dấu cách
+            search_name = mailbox_id.lower()
+            if search_name == 'todo':
+                search_name = 'to do'
+            
+            # Tìm nhãn có tên khớp
+            for label in labels:
+                if label['name'].lower() == search_name:
+                    gmail_label_id = label['id']
+                    break
+            
+            # Nếu vẫn không tìm thấy (nhãn chưa được tạo trên Gmail), trả về danh sách rỗng
+            if not gmail_label_id:
+                print(f"Label '{mailbox_id}' not found in Gmail account.")
+                return {
+                    "threads": [],
+                    "next_page_token": None,
+                    "result_size_estimate": 0
+                }
+        except Exception as e:
+            print(f"Error resolving label ID: {e}")
+            return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
+
+    # 3. Gọi Gmail API để lấy danh sách tin nhắn với Label ID chính xác
+    try:
+        results = service.users().messages().list(
+          userId='me',
+          labelIds=[gmail_label_id],
+          maxResults=limit,
+          pageToken=page_token
+        ).execute()
+    except Exception as e:
+        print(f"Error fetching messages from Gmail: {e}")
+        # Trả về rỗng nếu lỗi API (ví dụ 404 Label not found dù đã cố tìm)
+        return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
 
     messages = results.get('messages', [])
     next_page_token = results.get('nextPageToken', None)
@@ -86,51 +147,67 @@ class MailService:
 
     thread_list = []
 
+    # 4. Lấy chi tiết từng tin nhắn
     for msg in messages:
-      msg_data = service.users().messages().get(
-        userId='me',
-        id=msg['id'],
-        format='metadata'
-      ).execute()
+      try:
+          msg_data = service.users().messages().get(
+            userId='me',
+            id=msg['id'],
+            format='metadata' # Chỉ lấy metadata (headers) để tối ưu tốc độ
+          ).execute()
 
-      payload = msg_data.get('payload', {})
-      headers = payload.get('headers', [])
+          payload = msg_data.get('payload', {})
+          headers = payload.get('headers', [])
 
-      def get_header(name):
-        return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
+          # Hàm helper lấy header an toàn
+          def get_header(name):
+            return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
 
-      def get_header_list(name):
-        raw_value = get_header(name)
-        if not raw_value:
-          return []
-        return [{"name": n, "email": e} for n, e in email.utils.getaddresses([raw_value])]
+          # Parse người gửi
+          from_header = get_header('From')
+          if from_header:
+              name, email_addr = email.utils.parseaddr(from_header)
+              sender_obj = {"name": name, "email": email_addr}
+          else:
+              sender_obj = {"name": "Unknown", "email": ""}
 
-      subject = get_header('Subject') or '(No Subject)'
-      from_header = get_header('From')
-      to_list = get_header_list('To')
+          # Parse người nhận (To)
+          to_header = get_header('To')
+          to_list = []
+          if to_header:
+              to_list = [{"name": n, "email": e} for n, e in email.utils.getaddresses([to_header])]
 
-      name, email_addr = email.utils.parseaddr(from_header)
-      sender_obj = {"name": name, "email": email_addr}
+          subject = get_header('Subject') or '(No Subject)'
+          
+          internal_date = msg_data.get('internalDate')
+          received_on = datetime.fromtimestamp(int(internal_date)/1000).isoformat() if internal_date else ""
 
-      internal_date = msg_data.get('internalDate')
-      received_on = datetime.fromtimestamp(int(internal_date)/1000).isoformat() if internal_date else ""
+          preview_body = msg_data.get('snippet', '')
+          summary_text = None
+          if summarize:
+              try:
+                  summary_text = await self._get_summarizer().summarize(preview_body)
+              except Exception as e:
+                  logger.warning(f"Summarize preview failed for {msg.get('id')}: {e}")
 
-      # Use threadId if available, otherwise message id
-      thread_id = msg_data.get('threadId', msg['id'])
-
-      thread_list.append({
-        "id": msg['id'], # Keep message ID for now as per existing logic, or switch to thread_id? 
-                         # The prompt implies we need to support /emails/:id. 
-                         # If we return msg['id'], :id will be message id.
-        "history_id": msg_data.get('historyId'),
-        "subject": subject,
-        "sender": sender_obj,
-        "to": to_list,
-        "received_on": received_on,
-        "unread": "UNREAD" in msg_data.get('labelIds', []),
-        "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
-        "body": msg_data.get('snippet', '')
-      })
+          # Mapping dữ liệu trả về cho Frontend
+          thread_list.append({
+            "id": msg['id'],
+            "history_id": msg_data.get('historyId'),
+            "subject": subject,
+            "sender": sender_obj,
+            "to": to_list,
+            "received_on": received_on,
+            "unread": "UNREAD" in msg_data.get('labelIds', []),
+            # Trả về danh sách tags/labels để frontend hiển thị (nếu cần)
+            "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
+            "body": preview_body, # Snippet là bản tóm tắt ngắn của body
+            "summary": summary_text
+          })
+      except Exception as e:
+          # Log lỗi nhưng không làm chết cả danh sách nếu 1 email lỗi
+          print(f"Error processing message {msg.get('id')}: {e}")
+          continue
 
     return {
       "threads": thread_list,
@@ -138,7 +215,7 @@ class MailService:
       "result_size_estimate": result_size_estimate
     }
 
-  async def get_email_detail(self, user_id: str, email_id: str) -> ThreadDetailResponse:
+  async def get_email_detail(self, user_id: str, email_id: str, summarize: bool = False) -> ThreadDetailResponse:
     service = await self.get_gmail_service(user_id)
     
     # First try to get the message to find the threadId
@@ -158,6 +235,11 @@ class MailService:
     parsed_messages = []
     for msg in messages:
         parsed = self._parse_gmail_message(msg)
+        if summarize:
+            try:
+                parsed["summary"] = await self._get_summarizer().summarize(parsed.get("body", ""))
+            except Exception as e:
+                logger.warning(f"Summarize detail failed for {msg.get('id')}: {e}")
         parsed_messages.append(parsed)
     
     # Sort by date
@@ -480,66 +562,94 @@ class MailService:
       except Exception as e:
           raise ValueError(f"Failed to create draft: {str(e)}")
 
+  # [CẬP NHẬT] Sửa lại hàm modify_email
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
       service = await self.get_gmail_service(user_id)
       
       print(f"[MODIFY EMAIL] user_id={user_id}, email_id={email_id}, updates={updates}")
 
-      add_labels = []
-      remove_labels = []
+      add_label_ids = []
+      remove_label_ids = []
 
-      # Handle unread/read status
+      # Xử lý unread
       if 'unread' in updates:
           if updates['unread']:
-              add_labels.append('UNREAD')
-              if 'UNREAD' in remove_labels:
-                  remove_labels.remove('UNREAD')
+              add_label_ids.append('UNREAD')
+              if 'UNREAD' in remove_label_ids: remove_label_ids.remove('UNREAD')
           else:
-              remove_labels.append('UNREAD')
-              if 'UNREAD' in add_labels:
-                  add_labels.remove('UNREAD')
+              remove_label_ids.append('UNREAD')
+              if 'UNREAD' in add_label_ids: add_label_ids.remove('UNREAD')
 
-      # Handle starred status
+      # Xử lý starred
       if 'starred' in updates:
           if updates['starred']:
-              add_labels.append('STARRED')
-              if 'STARRED' in remove_labels:
-                  remove_labels.remove('STARRED')
+              add_label_ids.append('STARRED')
+              if 'STARRED' in remove_label_ids: remove_label_ids.remove('STARRED')
           else:
-              remove_labels.append('STARRED')
-              if 'STARRED' in add_labels:
-                  add_labels.remove('STARRED')
+              remove_label_ids.append('STARRED')
+              if 'STARRED' in add_label_ids: add_label_ids.remove('STARRED')
 
-      # Handle custom labels array (e.g., labels: ['trash'] to move to trash)
+      # Xử lý trash
+      if updates.get('trash'):
+           add_label_ids.append('TRASH')
+           # Gmail tự động xóa các nhãn khác khi vào Trash, nhưng ta cứ thêm vào list xóa cho chắc
+           if 'TRASH' in remove_label_ids: remove_label_ids.remove('TRASH')
+
+      # [LOGIC MỚI] Xử lý custom labels (Todo, Done...)
       if 'labels' in updates:
           labels_to_add = updates.get('labels', [])
-          for label in labels_to_add:
-              label_upper = label.upper()
-              if label_upper not in add_labels:
-                  add_labels.append(label_upper)
-              # Remove from remove list if it was there
-              if label_upper in remove_labels:
-                  remove_labels.remove(label_upper)
+          
+          # Nếu di chuyển sang cột khác, ta cần xóa nhãn của cột cũ (Inbox, Todo, Done)
+          # Đây là logic Kanban: Email chỉ nên ở 1 cột
+          KANBAN_LABELS = ['INBOX', 'To Do', 'Done'] 
+          
+          # Lấy danh sách ID của các nhãn Kanban hiện tại để xóa
+          # Lưu ý: Logic này hơi phức tạp vì ta cần biết email đang có nhãn gì để xóa
+          # Để đơn giản cho bài tập: Frontend gửi label mới, ta thêm label mới và xóa INBOX nếu có.
+          
+          for label_name in labels_to_add:
+              # Lấy ID thật của nhãn (ví dụ: "todo" -> "Label_123")
+              real_label_id = await self._get_or_create_label_id(service, user_id, label_name)
+              
+              if real_label_id not in add_label_ids:
+                  add_label_ids.append(real_label_id)
+              
+              # Nếu thêm vào To Do hoặc Done, hãy xóa khỏi INBOX (Archive)
+              if label_name.lower() in ['todo', 'done']:
+                  remove_label_ids.append('INBOX')
 
-      # Handle trash flag
-      if updates.get('trash'):
-           if 'TRASH' not in add_labels:
-               add_labels.append('TRASH')
-           if 'TRASH' in remove_labels:
-               remove_labels.remove('TRASH')
+              if label_name.lower() == 'inbox':
+                  # Tìm ID của Todo và Done để xóa
+                  todo_id = await self._get_or_create_label_id(service, user_id, 'To Do')
+                  done_id = await self._get_or_create_label_id(service, user_id, 'Done')
+                  snooze_id = await self._get_or_create_label_id(service, user_id, 'SNOOZED')
+                  
+                  remove_label_ids.extend([todo_id, done_id, snooze_id])
+            # Nếu label mới là 'todo' hoặc 'done', hãy xóa 'INBOX' và nhãn còn lại
+              elif label_name.lower() in ['todo', 'done', 'to do']:
+                  remove_label_ids.append('INBOX')
+                  
+                  # Nếu đang chuyển sang Done, thì xóa Todo và ngược lại
+                  if label_name.lower() in ['done']:
+                       todo_id = await self._get_or_create_label_id(service, user_id, 'To Do')
+                       remove_label_ids.append(todo_id)
+                  elif label_name.lower() in ['todo', 'to do']:
+                       done_id = await self._get_or_create_label_id(service, user_id, 'Done')
+                       remove_label_ids.append(done_id)
 
       body = {
-          'addLabelIds': add_labels,
-          'removeLabelIds': remove_labels
+          'addLabelIds': add_label_ids,
+          'removeLabelIds': remove_label_ids
       }
       
-      print(f"[MODIFY EMAIL] Sending to Gmail API - add: {add_labels}, remove: {remove_labels}")
+      print(f"[MODIFY EMAIL] Sending to Gmail API - add: {add_label_ids}, remove: {remove_label_ids}")
 
-      updated_message = service.users().messages().modify(userId='me', id=email_id, body=body).execute()
-      
-      print(f"[MODIFY EMAIL] Gmail API response: {updated_message}")
+      try:
+          service.users().messages().modify(userId='me', id=email_id, body=body).execute()
+      except Exception as e:
+          print(f"Gmail API Error: {e}")
+          raise ValueError(f"Failed to modify email labels: {str(e)}")
 
-      # We need to return the updated email detail
       return await self.get_email_detail(user_id, email_id)
 
   def _ensure_filename_extension(self, filename: str, mime_type: str) -> str:
@@ -558,6 +668,8 @@ class MailService:
           return f"{filename}{extension}"
       
       return filename
+
+
 
   async def get_attachment(self, user_id: str, message_id: str, attachment_id: str):
       """Get attachment data and metadata (filename, mime_type) from Gmail API."""
@@ -698,3 +810,167 @@ class MailService:
       }
       logger.info(f"[Attachment] Returning result - filename: {result['filename']}, mime_type: {result['mime_type']}, data_size: {len(result['data'])}")
       return result
+
+  async def summarize_email(self, user_id: str, email_id: str) -> dict:
+      """Summarize a single email's latest message."""
+      detail = await self.get_email_detail(user_id, email_id, summarize=False)
+      latest = detail.get("latest") if isinstance(detail, dict) else detail.latest  # detail is dict-like
+
+      body = ""
+      if isinstance(latest, dict):
+          body = latest.get("body", "") or latest.get("decoded_body", "") or ""
+      else:
+          body = getattr(latest, "body", "") or getattr(latest, "decoded_body", "") or ""
+
+      summary_text = ""
+      try:
+          summary_text = await self._get_summarizer().summarize(body)
+      except Exception as e:
+          logger.warning(f"Summarize single email failed for {email_id}: {e}")
+          summary_text = ""
+
+      return {"email_id": email_id, "summary": summary_text}
+
+# [THÊM MỚI] Hàm hỗ trợ tìm hoặc tạo Label ID từ tên
+  async def _get_or_create_label_id(self, service, user_id: str, label_name: str) -> str:
+      # Map các tên cột Kanban sang tên hiển thị trên Gmail
+      SYSTEM_LABELS = {'INBOX': 'INBOX', 'TRASH': 'TRASH', 'SPAM': 'SPAM', 'UNREAD': 'UNREAD', 'STARRED': 'STARRED'}
+      label_upper = label_name.upper()
+      
+      # Nếu là nhãn hệ thống, trả về ngay
+      if label_upper in SYSTEM_LABELS:
+          return SYSTEM_LABELS[label_upper]
+
+      # Chuẩn hóa tên hiển thị cho đẹp (todo -> To Do, done -> Done)
+      display_name = label_name.title() 
+      if label_upper == "TODO": display_name = "To Do"
+      
+      try:
+          # 1. Lấy danh sách tất cả nhãn hiện có
+          results = service.users().labels().list(userId='me').execute()
+          labels = results.get('labels', [])
+          
+          # 2. Tìm xem nhãn đã tồn tại chưa (so sánh tên)
+          for label in labels:
+              if label['name'].lower() == display_name.lower():
+                  return label['id'] # Trả về Label ID thật (vd: Label_34234)
+
+          # 3. Nếu chưa có, tạo mới nhãn trên Gmail
+          print(f"Creating new label: {display_name}")
+          created_label = service.users().labels().create(
+              userId='me', 
+              body={
+                  'name': display_name,
+                  'labelListVisibility': 'labelShow',
+                  'messageListVisibility': 'show'
+              }
+          ).execute()
+          return created_label['id']
+          
+      except Exception as e:
+          print(f"Error getting/creating label {label_name}: {str(e)}")
+          # Fallback: Trả về nguyên gốc nếu lỗi (có thể gây lỗi 400 nhưng tốt hơn là crash)
+          return label_name
+
+  async def snooze_email(self, user_id: str, email_id: str, snooze_until: datetime):
+        service = await self.get_gmail_service(user_id)
+
+        # Normalize snooze time to UTC
+        snooze_until_utc = (
+            snooze_until.replace(tzinfo=timezone.utc)
+            if snooze_until.tzinfo is None
+            else snooze_until.astimezone(timezone.utc)
+        )
+
+        # Fetch current labels to restore later
+        try:
+            msg_metadata = service.users().messages().get(
+                userId='me', id=email_id, format='minimal'
+            ).execute()
+            current_labels = msg_metadata.get('labelIds', [])
+        except Exception as e:
+            raise ValueError(f"Failed to read current labels before snooze: {e}")
+
+        # 1. Create SNOOZED label on Gmail if it does not exist
+        snooze_label_id = await self._get_or_create_label_id(service, user_id, "SNOOZED")
+
+        # 2. Remove from INBOX, add to SNOOZED
+        body = {
+            'addLabelIds': [snooze_label_id],
+            'removeLabelIds': ['INBOX']
+        }
+        try:
+            service.users().messages().modify(userId='me', id=email_id, body=body).execute()
+        except Exception as e:
+            raise ValueError(f"Gmail API Error: {e}")
+
+        # 3. Save to MongoDB for worker to monitor (track original labels)
+        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        await self.snoozed_collection.update_one(
+            {"email_id": email_id, "user_id": user_id},
+            {
+                "$set": {
+                    "user_id": user_id,
+                    "email_id": email_id,
+                    "snooze_until": snooze_until_utc,
+                    "status": "active",
+                    "original_labels": current_labels,
+                    "updated_at": now_utc,
+                },
+                "$setOnInsert": {"created_at": now_utc},
+            },
+            upsert=True
+        )
+
+        return {"message": f"Email snoozed until {snooze_until_utc.isoformat()}"}
+
+    # Function called by Scheduler
+  async def check_and_restore_snoozed_emails(self):
+        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        # Find emails whose snooze has expired and are still active
+        cursor = self.snoozed_collection.find({
+            "snooze_until": {"$lte": now_utc},
+            "status": "active"
+        })
+
+        async for record in cursor:
+            user_id = record["user_id"]
+            email_id = record["email_id"]
+            original_labels = record.get("original_labels") or ["INBOX"]
+
+            # Remove SNOOZED from the labels we will add back
+            labels_to_restore = [
+                label for label in original_labels if label != "SNOOZED"
+            ]
+
+            try:
+                print(f"[SNOOZE WORKER] Restoring email {email_id} for user {user_id}")
+                service = await self.get_gmail_service(user_id)
+
+                snooze_label_id = await self._get_or_create_label_id(service, user_id, "SNOOZED")
+
+                body = {
+                    'addLabelIds': labels_to_restore,
+                    'removeLabelIds': [snooze_label_id]
+                }
+                service.users().messages().modify(userId='me', id=email_id, body=body).execute()
+
+                await self.snoozed_collection.update_one(
+                    {"_id": record["_id"]},
+                    {"$set": {
+                        "status": "processed",
+                        "restored_at": now_utc,
+                        "updated_at": now_utc,
+                        "last_error": None
+                    }}
+                )
+            except Exception as e:
+                await self.snoozed_collection.update_one(
+                    {"_id": record["_id"]},
+                    {"$set": {
+                        "status": "error",
+                        "last_error": str(e),
+                        "updated_at": now_utc
+                    }}
+                )
+                print(f"[SNOOZE WORKER] Error restoring email {email_id}: {e}")

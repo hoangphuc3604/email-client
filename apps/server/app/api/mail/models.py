@@ -68,6 +68,7 @@ class ParsedMessage(CamelModel):
     references: Optional[str] = None
     in_reply_to: Optional[str] = None
     reply_to: Optional[str] = None
+    summary: Optional[str] = None
 
 
 class ThreadPreview(CamelModel):
@@ -84,6 +85,7 @@ class ThreadPreview(CamelModel):
     unread: bool
     tags: List[Label]
     body: str  # Preview text
+    summary: Optional[str] = None
 
 
 class ThreadListResponse(CamelModel):
@@ -147,3 +149,7 @@ class ReplyEmailRequest(CamelModel):
     to: str
     subject: str
     body: str
+
+# Thêm vào cuối file hoặc chỗ phù hợp
+class SnoozeEmailRequest(CamelModel):
+    snooze_until: datetime

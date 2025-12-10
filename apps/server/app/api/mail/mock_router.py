@@ -24,7 +24,8 @@ async def get_mailboxes():
 async def get_emails(
     mailbox_id: str,
     page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(50, ge=1, le=100, description="Items per page")
+    limit: int = Query(50, ge=1, le=100, description="Items per page"),
+    summarize: bool = Query(False, description="Mock flag, ignored")
 ):
     """Get paginated thread list for a mailbox (Mock)."""
     result = mock_data.get_emails_by_mailbox(mailbox_id, page, limit)
