@@ -1,18 +1,60 @@
-import { Card, Badge } from 'react-bootstrap';
-import { FaStar, FaRegStar, FaClock } from 'react-icons/fa'; // Gộp import icon cho gọn
+import { Card, Badge, Spinner } from 'react-bootstrap';
+import { FaStar, FaRegStar, FaClock } from 'react-icons/fa';
+import { useEffect, useState } from 'react';
+import mailApi from '../../api/mail';
 
 interface KanbanCardProps {
   email: any;
   onClick: (email: any) => void;
-  onSnooze?: (emailId: string) => void; // Optional để tránh lỗi code cũ
+  onSnooze?: (emailId: string) => void;
 }
 
 export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps) {
   const sender = typeof email.sender === 'string' ? email.sender : (email.sender?.name || email.sender?.email || 'Unknown');
   const isStarred = (email.labels || []).includes('starred') || (email.tags || []).some((t: any) => t.id === 'starred');
+  
+  const [summary, setSummary] = useState<string>(email.preview || email.body?.substring(0, 100) || '');
+  const [loadingSummary, setLoadingSummary] = useState(false);
 
-  // Giả lập hiển thị AI Summary nếu có
-  const summary = email.ai_summary || email.body?.substring(0, 100) || email.preview || "";
+  useEffect(() => {
+    // Fetch AI summary on mount
+    const fetchSummary = async () => {
+      if (email.ai_summary) {
+        setSummary(email.ai_summary);
+        return;
+      }
+      
+      setLoadingSummary(true);
+      try {
+        const result = await mailApi.summarizeEmail(email.id);
+        if (result && typeof result === 'object') {
+          // Extract summary from response data
+          const summaryText = result.summary || result.additionalProp1?.summary || '';
+          
+          // Check if summary looks like error/limit response (contains certain keywords or is JSON)
+          const isError = summaryText.includes('limit') || 
+                          summaryText.includes('error') || 
+                          summaryText.includes('quota') ||
+                          summaryText.includes('{') ||
+                          summaryText.includes('additionalProp') ||
+                          summaryText.length < 10;
+          
+          if (isError) {
+            setSummary(''); // Leave blank if error/limit reached
+          } else {
+            setSummary(summaryText);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch summary:', error);
+        setSummary(''); // Leave blank on error
+      } finally {
+        setLoadingSummary(false);
+      }
+    };
+
+    fetchSummary();
+  }, [email.id, email.ai_summary]);
 
   return (
     <Card 
@@ -60,8 +102,14 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
         </h6>
         
         {/* Summary */}
-        <Card.Text style={{ fontSize: '0.85rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', color: '#b8b8b8' }}>
-          {summary}...
+        <Card.Text style={{ fontSize: '0.85rem', color: '#b8b8b8', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {loadingSummary ? (
+            <span className="d-flex align-items-center gap-2">
+              <Spinner size="sm" animation="border" /> Loading summary...
+            </span>
+          ) : (
+            summary
+          )}
         </Card.Text>
 
         {/* Badge */}

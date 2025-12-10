@@ -155,6 +155,11 @@ const mailApi = {
     })
     return res.data?.data || res.data
   },
+
+  async summarizeEmail(emailId: string) {
+    const res = await api.post(`${BASE_ENDPOINT}/emails/${emailId}/summarize`)
+    return res.data?.data || res.data
+  },
 }
 
 export { mailApi }
