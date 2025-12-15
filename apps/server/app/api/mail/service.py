@@ -77,6 +77,30 @@ class MailService:
       for label in labels
     ]
 
+  def _has_attachments(self, payload: dict) -> bool:
+    """
+    Check if a Gmail message payload has attachments.
+    Returns True if any part has a filename (indicating an attachment).
+    """
+    def check_parts(parts):
+      if not parts:
+        return False
+      for part in parts:
+        # If this part has a filename, it's an attachment
+        if part.get('filename'):
+          return True
+        # Recursively check nested parts
+        if part.get('parts') and check_parts(part.get('parts')):
+          return True
+      return False
+    
+    # Check if payload has parts
+    if payload.get('parts'):
+      return check_parts(payload.get('parts'))
+    
+    # Single part message - check if it has a filename
+    return bool(payload.get('filename'))
+
   async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
     """
     Lấy danh sách email từ Gmail dựa trên mailbox_id (nhãn).
@@ -153,7 +177,7 @@ class MailService:
           msg_data = service.users().messages().get(
             userId='me',
             id=msg['id'],
-            format='metadata' # Chỉ lấy metadata (headers) để tối ưu tốc độ
+            format='full' # Need full format to get payload parts for attachment detection
           ).execute()
 
           payload = msg_data.get('payload', {})
@@ -190,6 +214,9 @@ class MailService:
               except Exception as e:
                   logger.warning(f"Summarize preview failed for {msg.get('id')}: {e}")
 
+          # Check if message has attachments
+          has_attachments = self._has_attachments(payload)
+
           # Mapping dữ liệu trả về cho Frontend
           thread_list.append({
             "id": msg['id'],
@@ -202,7 +229,8 @@ class MailService:
             # Trả về danh sách tags/labels để frontend hiển thị (nếu cần)
             "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
             "body": preview_body, # Snippet là bản tóm tắt ngắn của body
-            "summary": summary_text
+            "summary": summary_text,
+            "has_attachments": has_attachments
           })
       except Exception as e:
           # Log lỗi nhưng không làm chết cả danh sách nếu 1 email lỗi

@@ -1,6 +1,6 @@
 import { Card, Badge, Spinner } from 'react-bootstrap';
 import { FaStar, FaRegStar, FaClock } from 'react-icons/fa';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import mailApi from '../../api/mail';
 
 interface KanbanCardProps {
@@ -9,22 +9,41 @@ interface KanbanCardProps {
   onSnooze?: (emailId: string) => void;
 }
 
+// Global cache to track which emails have already fetched summaries
+const summaryFetchedCache = new Set<string>();
+
 export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps) {
   const sender = typeof email.sender === 'string' ? email.sender : (email.sender?.name || email.sender?.email || 'Unknown');
   const isStarred = (email.labels || []).includes('starred') || (email.tags || []).some((t: any) => t.id === 'starred');
   
-  const [summary, setSummary] = useState<string>(email.preview || email.body?.substring(0, 100) || '');
+  const [summary, setSummary] = useState<string>('');
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const hasFetchedRef = useRef(false);
 
   useEffect(() => {
+    // Skip if already fetched for this email ID globally
+    if (summaryFetchedCache.has(email.id)) {
+      return;
+    }
+
+    // Skip if already fetched in this component instance
+    if (hasFetchedRef.current) {
+      return;
+    }
+
     // Fetch AI summary on mount
     const fetchSummary = async () => {
       if (email.ai_summary) {
         setSummary(email.ai_summary);
+        hasFetchedRef.current = true;
+        summaryFetchedCache.add(email.id);
         return;
       }
       
       setLoadingSummary(true);
+      hasFetchedRef.current = true;
+      summaryFetchedCache.add(email.id); // Mark as fetched BEFORE the API call
+      
       try {
         const result = await mailApi.summarizeEmail(email.id);
         if (result && typeof result === 'object') {
@@ -54,7 +73,8 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
     };
 
     fetchSummary();
-  }, [email.id, email.ai_summary]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only run once on mount
 
   return (
     <Card 
