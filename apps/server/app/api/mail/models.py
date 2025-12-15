@@ -86,6 +86,7 @@ class ThreadPreview(CamelModel):
     tags: List[Label]
     body: str  # Preview text
     summary: Optional[str] = None
+    has_attachments: bool = False
 
 
 class ThreadListResponse(CamelModel):

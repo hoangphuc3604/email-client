@@ -1,8 +1,7 @@
-// apps/client/src/components/Dashboard/KanbanBoard.tsx
 import { useState } from 'react';
-import { Row, Col, Spinner, Modal, Form, Button } from 'react-bootstrap';
+import { Row, Col, Spinner, Modal, Form, Button, ButtonGroup } from 'react-bootstrap';
 import KanbanCard from './KanbanCard';
-import { FaClock } from 'react-icons/fa';
+import { FaClock, FaFilter, FaSortAmountDown, FaSortAmountUp } from 'react-icons/fa';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { KANBAN_COLUMNS, useKanbanColumns, useMoveEmail, useSnoozeEmail } from '../../hooks/useKanban';
 
@@ -10,10 +9,17 @@ interface KanbanBoardProps {
   onOpenEmail: (email: any) => void;
 }
 
+type SortOption = 'newest' | 'oldest' | 'sender';
+type FilterOption = 'all' | 'unread' | 'attachments';
+
 export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
   const { data: columnsData, isLoading, isError, error } = useKanbanColumns();
   const moveEmail = useMoveEmail();
   const snoozeEmail = useSnoozeEmail();
+  
+  // Filtering & Sorting State
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [filterBy, setFilterBy] = useState<FilterOption>('all');
   
   // State cho Snooze Modal
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
@@ -79,6 +85,36 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
     });
   };
 
+  // Filter and Sort emails within each column
+  const getFilteredAndSortedEmails = (emails: any[]) => {
+    if (!emails) return [];
+    
+    // Apply filtering
+    let filtered = [...emails];
+    
+    if (filterBy === 'unread') {
+      filtered = filtered.filter(email => email.unread === true);
+    } else if (filterBy === 'attachments') {
+      // Filter emails that have attachments (backend now provides hasAttachments field)
+      filtered = filtered.filter(email => email.hasAttachments === true);
+    }
+    
+    // Apply sorting
+    if (sortBy === 'oldest') {
+      // Just reverse the default order for oldest
+      filtered = [...filtered].reverse();
+    } else if (sortBy === 'sender') {
+      filtered.sort((a, b) => {
+        const senderA = typeof a.sender === 'string' ? a.sender : (a.sender?.name || a.sender?.email || '');
+        const senderB = typeof b.sender === 'string' ? b.sender : (b.sender?.name || b.sender?.email || '');
+        return senderA.toLowerCase().localeCompare(senderB.toLowerCase());
+      });
+    }
+    // For 'newest', keep the default order from API
+    
+    return filtered;
+  };
+
   // Show error state
   if (isError) {
     return (
@@ -106,6 +142,59 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
 
   return (
     <>
+      {/* Filter & Sort Controls */}
+      <div className="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div className="d-flex gap-2 align-items-center">
+          <FaFilter className="text-info" />
+          <span className="text-white me-2">Filter:</span>
+          <ButtonGroup size="sm">
+            <Button 
+              variant={filterBy === 'all' ? 'info' : 'outline-info'}
+              onClick={() => setFilterBy('all')}
+            >
+              All
+            </Button>
+            <Button 
+              variant={filterBy === 'unread' ? 'info' : 'outline-info'}
+              onClick={() => setFilterBy('unread')}
+            >
+              Unread Only
+            </Button>
+            <Button 
+              variant={filterBy === 'attachments' ? 'info' : 'outline-info'}
+              onClick={() => setFilterBy('attachments')}
+            >
+              Has Attachments
+            </Button>
+          </ButtonGroup>
+        </div>
+
+        <div className="d-flex gap-2 align-items-center">
+          {sortBy === 'newest' ? <FaSortAmountDown className="text-info" /> : <FaSortAmountUp className="text-info" />}
+          <span className="text-white me-2">Sort:</span>
+          <ButtonGroup size="sm">
+            <Button 
+              variant={sortBy === 'newest' ? 'info' : 'outline-info'}
+              onClick={() => setSortBy('newest')}
+            >
+              Date: Newest First
+            </Button>
+            <Button 
+              variant={sortBy === 'oldest' ? 'info' : 'outline-info'}
+              onClick={() => setSortBy('oldest')}
+            >
+              Date: Oldest First
+            </Button>
+            <Button 
+              variant={sortBy === 'sender' ? 'info' : 'outline-info'}
+              onClick={() => setSortBy('sender')}
+            >
+              Sender (A-Z)
+            </Button>
+          </ButtonGroup>
+        </div>
+      </div>
+
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="kanban-scroll-container h-100 px-2" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
           <Row className="flex-nowrap" style={{ minWidth: '100%', height: '100%' }}>
@@ -119,7 +208,7 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
                 <div className="p-3 mb-3 text-center rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid #c770f0' }}>
                   <h5 className="m-0 text-white">{col.title}</h5>
                   <small style={{ color: '#0dcaf0', fontWeight: 'bold' }}>
-                    {columnsData[col.id]?.length || 0} cards
+                    {getFilteredAndSortedEmails(columnsData[col.id] || []).length} / {columnsData[col.id]?.length || 0} cards
                   </small>
                 </div>
                 
@@ -137,7 +226,7 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
                         borderRadius: '8px'
                       }}
                     >
-                      {(columnsData[col.id] || []).map((email: any, index: number) => (
+                      {getFilteredAndSortedEmails(columnsData[col.id] || []).map((email: any, index: number) => (
                         <Draggable 
                           key={email.id} 
                           draggableId={email.id} 
@@ -165,9 +254,9 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
                       ))}
                       {provided.placeholder}
                       
-                      {(!columnsData[col.id] || columnsData[col.id].length === 0) && (
+                      {getFilteredAndSortedEmails(columnsData[col.id] || []).length === 0 && (
                         <div className="text-center mt-5" style={{ color: '#0dcaf0', opacity: 0.7 }}>
-                          Empty
+                          {columnsData[col.id]?.length > 0 ? 'No matching emails' : 'Empty'}
                         </div>
                       )}
                     </div>
