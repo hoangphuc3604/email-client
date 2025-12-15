@@ -5,11 +5,16 @@ import Container from "react-bootstrap/Container";
 import logo from "../../public/logo-title.svg";
 import { Link } from "react-router-dom";
 import { useNavigate } from 'react-router-dom'
+// [Cập nhật] Thêm các component UI cho search
+import Form from "react-bootstrap/Form";
+import InputGroup from "react-bootstrap/InputGroup";
+
 import { ImBlog } from "react-icons/im";
 import {
   AiOutlineFundProjectionScreen,
   AiOutlineUser,
   AiOutlineLogout,
+  AiOutlineSearch, // [Cập nhật] Icon tìm kiếm
 } from "react-icons/ai";
 import useAuthStore from '../store/authStore'
 import { useLogout } from '../hooks/useAuth'
@@ -17,6 +22,9 @@ import { useLogout } from '../hooks/useAuth'
 function NavBar() {
   const [expand, updateExpanded] = useState(false);
   const [navColour, updateNavbar] = useState(false);
+  
+  // [Cập nhật] State lưu từ khóa tìm kiếm
+  const [searchQuery, setSearchQuery] = useState(""); 
 
   function scrollHandler() {
     if (window.scrollY >= 20) {
@@ -37,11 +45,9 @@ function NavBar() {
     try {
       await logoutMutation.mutateAsync()
     } catch (e) {
-      // ignore server errors — we'll still clear client state
       console.error('Logout failed', e)
     }
 
-    // Ensure client-side tokens/state cleared and redirect to login
     try {
       localStorage.removeItem('email_previews_map')
     } catch (e) {}
@@ -56,6 +62,19 @@ function NavBar() {
     navigate('/login')
   }
 
+  // [Cập nhật] Hàm xử lý khi người dùng submit tìm kiếm
+  const handleSearch = (e: React.KeyboardEvent<HTMLInputElement> | React.FormEvent) => {
+    // Chỉ xử lý khi nhấn Enter hoặc submit form
+    if ((e as React.KeyboardEvent).key === 'Enter' || e.type === 'submit') {
+      e.preventDefault();
+      updateExpanded(false); // Đóng menu mobile nếu đang mở
+      
+      // Chuyển hướng sang trang Dashboard kèm tham số query
+      // Ví dụ: /dashboard?q=marketing
+      navigate(`/dashboard?q=${encodeURIComponent(searchQuery)}`);
+    }
+  }
+
   return (
     <Navbar
       expanded={expand}
@@ -67,6 +86,27 @@ function NavBar() {
         <Navbar.Brand href="/" className="d-flex">
           <img src={logo} className="img-fluid logo" alt="brand" />
         </Navbar.Brand>
+        
+        {/* [Cập nhật] Thanh tìm kiếm - Chỉ hiện khi đã đăng nhập */}
+        {user && (
+          <Form className="d-flex mx-auto search-box-nav" onSubmit={handleSearch} style={{ maxWidth: '400px', width: '100%' }}>
+            <InputGroup>
+              <InputGroup.Text className="bg-white border-end-0">
+                <AiOutlineSearch />
+              </InputGroup.Text>
+              <Form.Control
+                type="search"
+                placeholder="Search emails..."
+                className="border-start-0 ps-0"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearch}
+                aria-label="Search"
+              />
+            </InputGroup>
+          </Form>
+        )}
+
         <Navbar.Toggle
           aria-controls="responsive-navbar-nav"
           onClick={() => {
@@ -123,17 +163,6 @@ function NavBar() {
                 </Nav.Link>
               </Nav.Item>
             )}
-{/* 
-            <Nav.Item className="fork-btn">
-              <Button
-                href=""
-                target="_blank"
-                className="fork-btn-inner"
-              >
-                <CgGitFork style={{ fontSize: "1.2em" }} />{" "}
-                <AiFillStar style={{ fontSize: "1.1em" }} />
-              </Button>
-            </Nav.Item> */}
           </Nav>
         </Navbar.Collapse>
       </Container>

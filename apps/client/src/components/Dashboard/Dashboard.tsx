@@ -34,7 +34,9 @@ import {
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 import { BsKanban, BsListUl } from 'react-icons/bs'; 
+import { AiOutlineClose } from 'react-icons/ai'; // [Cập nhật] Icon đóng
 import KanbanBoard from './KanbanBoard'; 
+import { useSearchParams } from 'react-router-dom'; // [Cập nhật] Hook lấy query param
 
 // Map Gmail label IDs to friendly names
 const LABEL_NAME_MAP: Record<string, string> = {
@@ -88,6 +90,10 @@ export default function Dashboard() {
   const scrollStartRef = useRef(0)
   const INITIAL_LOAD_COUNT = 20
 
+  // [Cập nhật] Hook xử lý search query
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchQuery = searchParams.get('q');
+
   useEffect(() => {
     try {
       localStorage.setItem('email_previews_map', JSON.stringify(previewsMap))
@@ -95,6 +101,45 @@ export default function Dashboard() {
       console.error('Failed to save email state:', e)
     }
   }, [previewsMap])
+
+  // [Cập nhật] Logic xử lý khi có search query
+  useEffect(() => {
+    if (searchQuery) {
+      handleSearch(searchQuery);
+    }
+  }, [searchQuery]);
+
+  // [Cập nhật] Hàm thực hiện tìm kiếm
+  async function handleSearch(query: string) {
+    setLoading(true);
+    try {
+      // Gọi API tìm kiếm
+      const results = await mailApi.searchEmails(query);
+      
+      // Lưu kết quả vào một folder ảo tên là 'search_results'
+      setPreviewsMap((prev) => ({
+        ...prev,
+        'search_results': results || []
+      }));
+      
+      // Chuyển view sang folder kết quả tìm kiếm
+      setSelectedFolder('search_results');
+      setSelectedEmail(null);
+      setViewMode('list'); // Yêu cầu hiển thị list dọc cho kết quả search
+      setMobileView('list');
+      
+    } catch (e) {
+      console.error("Search failed", e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // [Cập nhật] Hàm xóa tìm kiếm và quay về Inbox
+  function clearSearch() {
+    setSearchParams({}); // Xóa query param trên URL
+    selectFolder('inbox');
+  }
 
   const displayList = useMemo(() => {
     return previewsMap[selectedFolder] || []
@@ -117,17 +162,26 @@ export default function Dashboard() {
   }, [previewsMap])
 
   function selectFolder(id: string) {
+    // [Cập nhật] Xóa search params khi người dùng chuyển folder thủ công
+    if (id !== 'search_results') {
+      setSearchParams({});
+    }
+
     setSelectedFolder(id)
     setSelectedEmail(null)
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
-    if (!loadedFolders.has(id) || foldersNeedReload.has(id)) {
+    
+    // Không load lại nếu là folder search_results (vì dữ liệu lấy từ API search)
+    if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
       loadFolderData(id, true)
     }
   }
 
   async function loadFolderData(folderId: string, isInitial: boolean = false) {
+    if (folderId === 'search_results') return; // Bỏ qua nếu là search results
+
     if (isInitial) {
       setLoading(true)
     } else {
@@ -176,6 +230,9 @@ export default function Dashboard() {
   }
 
   function loadMoreEmails() {
+    // Không load more cho search results (trừ khi API search hỗ trợ phân trang)
+    if (selectedFolder === 'search_results') return;
+
     const hasMore = hasMoreMap[selectedFolder]
     if (hasMore && !loadingMore) {
       loadFolderData(selectedFolder, false)
@@ -271,8 +328,11 @@ export default function Dashboard() {
       setMailboxes(filtered.length > 0 ? filtered : [])
       setLoadingMailboxes(false)
       
-      const inboxId = 'inbox'
-      await loadFolderData(inboxId, true)
+      // Nếu có query search thì không load inbox mặc định để tránh ghi đè UI
+      if (!searchQuery) {
+        const inboxId = 'inbox'
+        await loadFolderData(inboxId, true)
+      }
     } catch (e) {
       console.error('Error loading mailboxes:', e)
       setMailboxes([])
@@ -524,7 +584,17 @@ export default function Dashboard() {
     
     try {
       await mailApi.modifyEmail(email.id, { starred: !hasStar })
-      await refreshFolder()
+      if (selectedFolder !== 'search_results') {
+          await refreshFolder()
+      } else {
+          // Nếu đang ở search results, cập nhật state local
+          setPreviewsMap((prev) => ({
+             ...prev,
+             search_results: (prev['search_results'] || []).map(e => 
+                 e.id === email.id ? { ...e, labels: hasStar ? [] : ['starred'] } : e // Simplification
+             )
+          }));
+      }
     } catch (e) {
       console.error('Failed to toggle star on backend:', e)
       alert('Failed to update star status')
@@ -532,6 +602,10 @@ export default function Dashboard() {
   }
   
   async function refreshFolder() {
+    if (selectedFolder === 'search_results') {
+        if (searchQuery) handleSearch(searchQuery);
+        return;
+    }
     setSelectedEmail(null)
     setSelectedIds({})
     setMobileView('list')
@@ -905,6 +979,17 @@ export default function Dashboard() {
                   </ListGroup.Item>
                 ))
               )}
+               {/* [Cập nhật] Hiển thị mục Search Results nếu đang active */}
+               {selectedFolder === 'search_results' && (
+                 <ListGroup.Item action active className="border-top mt-2">
+                    <div className="d-flex justify-content-between align-items-center">
+                      <div><FaInbox className="me-2" /> Search Results</div>
+                      <Button variant="link" className="p-0 text-white" onClick={clearSearch}>
+                        <AiOutlineClose />
+                      </Button>
+                    </div>
+                 </ListGroup.Item>
+              )}
             </ListGroup>
           </Col>
 
@@ -937,12 +1022,21 @@ export default function Dashboard() {
           ) : (
             <>
           <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
+             {/* [Cập nhật] Header cho trang kết quả tìm kiếm */}
+             {selectedFolder === 'search_results' && (
+                <div className="alert alert-info py-2 px-3 mb-2 d-flex justify-content-between align-items-center">
+                   <small className="text-truncate" style={{maxWidth: '200px'}}>Results for: <strong>{searchQuery}</strong></small>
+                   <Button variant="outline-info" size="sm" onClick={clearSearch}>Clear</Button>
+                </div>
+              )}
+
             <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Switch View</Tooltip>}>
                 <Button 
                   variant="outline-info" 
                   className="me"
                   onClick={() => setViewMode(viewMode === 'list' ? 'kanban' : 'list')}
+                  disabled={selectedFolder === 'search_results'} // Không cho switch kanban khi search
                 >
                   {viewMode === 'list' ? <BsKanban /> : <BsListUl />}
                 </Button>
@@ -995,54 +1089,63 @@ export default function Dashboard() {
                 </div>
               ) : (
               <>
-                <ListGroup variant="flush">
-                  {displayList.map((email: any, idx: number) => {
-                    const id = email.id
-                    const isRead = ('read' in email) ? !!email.read : (email.unread === false)
-                    const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
-                    const subject = email.subject || ''
-                    const preview = email.body || email.preview || ''
-                    const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
-                    const isStarred = ((email.labels || email.tags) || []).includes('starred')
-                    return (
-                      <ListGroup.Item
-                        id={`email-row-${id}`}
-                        key={id}
-                        action
-                        className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
-                        onClick={(e) => {
-                          if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
-                            return
-                          }
-                          setCursorIndex(idx)
-                          openEmail(email)
-                        }}
-                      >
-                        <div className="checkbox-col me-2" onClick={(e) => e.stopPropagation()}>
-                          <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
-                        </div>
-                        <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
-                          {isStarred ? <FaStar /> : <FaRegStar />}
-                        </div>
-                        <div className="meta-col flex-fill">
-                          <div className="row-top d-flex justify-content-between">
-                            <div className="sender">{sender}</div>
-                            <div className="time">{timeAgo(ts)}</div>
+                {/* [Cập nhật] Hiển thị thông báo khi không có kết quả tìm kiếm */}
+                {displayList.length === 0 && selectedFolder === 'search_results' ? (
+                    <div className="text-center p-4 text-muted">
+                      <p>No results found for "{searchQuery}"</p>
+                      <Button variant="link" onClick={clearSearch}>Return to Inbox</Button>
+                    </div>
+                ) : (
+                  <ListGroup variant="flush">
+                    {displayList.map((email: any, idx: number) => {
+                      const id = email.id
+                      const isRead = ('read' in email) ? !!email.read : (email.unread === false)
+                      const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
+                      const subject = email.subject || ''
+                      const preview = email.body || email.preview || ''
+                      const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
+                      const isStarred = ((email.labels || email.tags) || []).includes('starred')
+                      return (
+                        <ListGroup.Item
+                          id={`email-row-${id}`}
+                          key={id}
+                          action
+                          className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
+                          onClick={(e) => {
+                            if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
+                              return
+                            }
+                            setCursorIndex(idx)
+                            openEmail(email)
+                          }}
+                        >
+                          <div className="checkbox-col me-2" onClick={(e) => e.stopPropagation()}>
+                            <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
                           </div>
-                          <div className="subject">{subject}</div>
-                          <div className="preview">{preview}</div>
-                        </div>
-                      </ListGroup.Item>
-                    )
-                  })}
-                </ListGroup>
+                          <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
+                            {isStarred ? <FaStar /> : <FaRegStar />}
+                          </div>
+                          <div className="meta-col flex-fill">
+                            <div className="row-top d-flex justify-content-between">
+                              <div className="sender">{sender}</div>
+                              <div className="time">{timeAgo(ts)}</div>
+                            </div>
+                            <div className="subject">{subject}</div>
+                            <div className="preview">{preview}</div>
+                          </div>
+                        </ListGroup.Item>
+                      )
+                    })}
+                  </ListGroup>
+                )}
+                
                 {loadingMore && (
                   <div className="text-center p-3">
                     <FaSync className="fa-spin" size={20} />
                     <small className="ms-2">Loading more...</small>
                   </div>
                 )}
-                {!loadingMore && hasMoreMap[selectedFolder] && (
+                {!loadingMore && hasMoreMap[selectedFolder] && selectedFolder !== 'search_results' && (
                   <div className="text-center p-3">
                     <small className="text-muted">Scroll down for more emails</small>
                   </div>
