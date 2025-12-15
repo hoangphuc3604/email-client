@@ -1,0 +1,45 @@
+{
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "user_id": {
+        "type": "string"
+      },
+      "message_id": {
+        "type": "string"
+      },
+      "thread_id": {
+        "type": "string"
+      },
+      "history_id": {
+        "type": "string"
+      },
+      "subject": {
+        "type": "autocomplete",
+        "analyzer": "lucene.standard"
+      },
+      "from_name": {
+        "type": "autocomplete",
+        "analyzer": "lucene.standard"
+      },
+      "from_email": {
+        "type": "autocomplete",
+        "analyzer": "lucene.standard"
+      },
+      "snippet": {
+        "type": "autocomplete",
+        "analyzer": "lucene.standard"
+      },
+      "labels": {
+        "type": "string"
+      },
+      "received_on": {
+        "type": "date"
+      },
+      "unread": {
+        "type": "boolean"
+      }
+    }
+  }
+}
+

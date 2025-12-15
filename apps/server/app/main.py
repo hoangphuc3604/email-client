@@ -112,6 +112,11 @@ async def ensure_indexes():
         snoozed = db["snoozed_emails"]
         await snoozed.create_index([("snooze_until", 1), ("status", 1)])
         await snoozed.create_index([("email_id", 1), ("user_id", 1)], unique=True)
+        email_index = db["email_index"]
+        await email_index.create_index([("user_id", 1), ("message_id", 1)], unique=True)
+        await email_index.create_index([("received_on", -1)])
+        sync_state = db["mail_sync_state"]
+        await sync_state.create_index([("user_id", 1)], unique=True)
     finally:
         await client.close()
 
@@ -127,11 +132,30 @@ async def run_snooze_job():
         await client.close()
 
 
+async def run_mail_sync_job():
+    """Periodic job to sync Gmail metadata into search index."""
+    client = AsyncMongoClient(settings.DB_CONNECTION_STRING)
+    try:
+        db = client[settings.DB_NAME]
+        mail_service = MailService(db)
+        await mail_service.sync_all_users()
+    finally:
+        await client.close()
+
+
 @app.on_event("startup")
 async def on_startup():
     # Initialize indexes and start scheduler
     await ensure_indexes()
     scheduler.add_job(run_snooze_job, "interval", minutes=1)
+    scheduler.add_job(
+        run_mail_sync_job,
+        "interval",
+        minutes=settings.MAIL_SYNC_INTERVAL_MINUTES,
+        next_run_time=None,
+        id="mail_sync_job",
+        replace_existing=True,
+    )
     scheduler.start()
     print("Scheduler started for Snooze jobs.")
 
