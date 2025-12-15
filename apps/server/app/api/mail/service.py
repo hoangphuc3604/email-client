@@ -254,19 +254,19 @@ class MailService:
         }
       }
     ]
-    filters = [
-      {"equals": {"path": "user_id", "value": user_id}}
-    ]
-    if mailbox_label_id:
-      filters.append({"equals": {"path": "labels", "value": mailbox_label_id}})
     search_stage = {
       "$search": {
         "index": "emails_fuzzy",
         "compound": {
-          "should": should_clauses,
-          "filter": filters
+          "should": should_clauses
         }
       }
+    }
+    match: Dict[str, Any] = {"user_id": user_id}
+    if mailbox_label_id:
+      match["labels"] = mailbox_label_id
+    match_stage = {
+      "$match": match
     }
     project_stage = {
       "$project": {
@@ -286,6 +286,7 @@ class MailService:
     }
     pipeline = [
       search_stage,
+      match_stage,
       project_stage,
       {"$sort": {"score": -1, "received_on": -1}},
       {"$skip": skip},
@@ -298,9 +299,9 @@ class MailService:
     mailbox_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
     pipeline = self._build_search_pipeline(query, user_id, mailbox_label_id, limit, page)
     try:
-      cursor = self.email_index_collection.aggregate(pipeline)
+      cursor = await self.email_index_collection.aggregate(pipeline)
       docs = await cursor.to_list(length=limit)
-    except Exception:
+    except Exception as e:
       fallback_filter = {"user_id": user_id}
       if mailbox_label_id:
         fallback_filter["labels"] = mailbox_label_id
