@@ -20,19 +20,6 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
   const [loadingSummary, setLoadingSummary] = useState(false);
   const hasFetchedRef = useRef(false);
 
-  // Log email structure to debug attachments
-  useEffect(() => {
-    console.log('Email data:', {
-      id: email.id,
-      subject: email.subject,
-      hasAttachments: !!email.attachments,
-      attachmentsType: typeof email.attachments,
-      isArray: Array.isArray(email.attachments),
-      attachmentsLength: email.attachments?.length,
-      attachments: email.attachments
-    });
-  }, [email.id, email.attachments]);
-
   useEffect(() => {
     // Skip if already fetched for this email ID globally
     if (summaryFetchedCache.has(email.id)) {

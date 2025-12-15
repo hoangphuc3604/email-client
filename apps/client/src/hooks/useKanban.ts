@@ -25,7 +25,6 @@ async function fetchColumns(): Promise<ColumnsData> {
       try {
         const res = await mailApi.listEmails(col.id, 10)
         const emails = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
-        console.log(`Fetched ${emails.length} emails for column ${col.id}. Sample email:`, emails[0])
         newData[col.id] = emails
       } catch (e) {
         console.error(`Error loading column ${col.id}`, e)

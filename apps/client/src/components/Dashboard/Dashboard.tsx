@@ -248,8 +248,6 @@ export default function Dashboard() {
         const nameUpper = String(box.name || '').toUpperCase()
         let displayName = LABEL_NAME_MAP[idUpper] || box.name
         let normalizedId = String(box.id).toLowerCase()
-
-        console.log('Mailbox:', box.id, box.name, '->', displayName);
         
         // Normalize IDs and display names for custom labels
         if (nameUpper === 'TODO' || nameUpper === 'TO DO') {
@@ -286,7 +284,6 @@ export default function Dashboard() {
     setLoadingEmail(true)
     try {
       const data = await mailApi.getEmail(email.id)
-      console.log('Email detail response:', data)
       const message = data.latest || data.messages?.[0] || data
       const senderStr = typeof message.sender === 'string' 
         ? message.sender 
