@@ -315,6 +315,24 @@ async def get_attachment(
         raise HTTPException(status_code=500, detail=f"Failed to download attachment: {str(e)}")
 
 
+@router.get("/search", response_model=APIResponse[List[ThreadPreview]])
+async def search_emails(
+    q: str = Query(..., min_length=1, description="Search query"),
+    mailbox_id: Optional[str] = Query(None, description="Optional mailbox/label filter"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Results per page"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    try:
+        results = await mail_service.search_emails(current_user.id, q, mailbox_id, page, limit)
+        return APIResponse(data=results, message="Search completed successfully")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search emails: {str(e)}")
+
+
 @router.post("/emails/{email_id}/summarize", response_model=APIResponse[dict])
 async def summarize_email(
     email_id: str,

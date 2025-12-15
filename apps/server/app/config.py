@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = ""
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    MAIL_SYNC_INTERVAL_MINUTES: int = 10
+    MAIL_SYNC_LOOKBACK_DAYS: int = 90
+    MAIL_SYNC_MAX_PAGES: int = 5
 
     model_config = SettingsConfigDict(env_file=".env.local")
 
