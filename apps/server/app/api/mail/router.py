@@ -362,3 +362,30 @@ async def snooze_email_endpoint(
         return APIResponse(data=result, message="Email snoozed successfully")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync", response_model=APIResponse[dict])
+async def sync_email_index(
+    mailbox_id: Optional[str] = Query(None, description="Optional mailbox to sync"),
+    lookback_days: int = Query(90, ge=1, le=365, description="Days to look back"),
+    max_pages: int = Query(5, ge=1, le=20, description="Max pages to sync"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Sync emails from Gmail to MongoDB email index for search.
+    This populates the email_index collection with email metadata.
+    """
+    try:
+        await mail_service.sync_email_index(
+            current_user.id,
+            mailbox_id,
+            lookback_days,
+            max_pages
+        )
+        return APIResponse(
+            data={"synced": True},
+            message=f"Email index synced successfully for the last {lookback_days} days"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to sync email index: {str(e)}")

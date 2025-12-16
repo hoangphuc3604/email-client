@@ -295,13 +295,19 @@ class MailService:
     return pipeline
 
   async def search_emails(self, user_id: str, query: str, mailbox_id: Optional[str], page: int, limit: int):
+    logger.info(f"[SEARCH] user_id={user_id}, query='{query}', mailbox_id={mailbox_id}, page={page}, limit={limit}")
     service = await self.get_gmail_service(user_id)
     mailbox_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
     pipeline = self._build_search_pipeline(query, user_id, mailbox_label_id, limit, page)
+    
+    logger.info(f"[SEARCH] Pipeline: {pipeline}")
+    
     try:
       cursor = await self.email_index_collection.aggregate(pipeline)
       docs = await cursor.to_list(length=limit)
+      logger.info(f"[SEARCH] Atlas search returned {len(docs)} docs")
     except Exception as e:
+      logger.warning(f"[SEARCH] Atlas search failed: {e}, falling back to regex search")
       fallback_filter = {"user_id": user_id}
       if mailbox_label_id:
         fallback_filter["labels"] = mailbox_label_id
@@ -315,7 +321,14 @@ class MailService:
         ],
         **fallback_filter
       }
+      logger.info(f"[SEARCH] Fallback query: {fallback_query}")
       docs = await self.email_index_collection.find(fallback_query).sort("received_on", -1).limit(limit).to_list(length=limit)
+      logger.info(f"[SEARCH] Fallback search returned {len(docs)} docs")
+    
+    # Check if email_index_collection has any data at all
+    total_count = await self.email_index_collection.count_documents({"user_id": user_id})
+    logger.info(f"[SEARCH] Total emails in index for user: {total_count}")
+    
     results = []
     for doc in docs:
       labels = doc.get("labels", [])
@@ -331,8 +344,11 @@ class MailService:
         "received_on": doc.get("received_on") or "",
         "unread": doc.get("unread", False),
         "tags": [{"id": l, "name": l} for l in labels],
-        "body": doc.get("snippet", "")[:150]
+        "body": doc.get("snippet", "")[:150],
+        "has_attachments": doc.get("has_attachments", False)
       })
+    
+    logger.info(f"[SEARCH] Returning {len(results)} results")
     return results
 
   async def sync_all_users(self, mailbox_id: Optional[str] = None):

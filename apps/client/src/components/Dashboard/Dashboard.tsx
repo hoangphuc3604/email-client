@@ -92,8 +92,9 @@ export default function Dashboard() {
     
   // Thêm state
   const [filterMode, setFilterMode] = useState<'all' | 'unread' | 'has-attachment'>('all');
-  const [sortMode, setSortMode] = useState<'date-desc' | 'date-asc'>('date-desc');
+  const [sortMode, setSortMode] = useState<'date-desc' | 'date-asc' | 'sender-asc'>('date-desc');
   const [error, setError] = useState<string | null>(null); // Cho F2 Error State
+  const [autoSyncAttempted, setAutoSyncAttempted] = useState(false); // Track if auto-sync was attempted
   
   // [Cập nhật] Hook xử lý search query
   const [searchParams, setSearchParams] = useSearchParams();
@@ -115,22 +116,64 @@ export default function Dashboard() {
   }, [searchQuery]);
 
   // [Cập nhật] Hàm thực hiện tìm kiếm
-  async function handleSearch(query: string) {
+  async function handleSearch(query: string, skipAutoSync: boolean = false) {
     setLoading(true);
     setError(null); // Reset lỗi cũ
     try {
+      console.log('[Search] Calling API with query:', query);
       const results = await mailApi.searchEmails(query);
+      console.log('[Search] Raw API response:', results);
+      console.log('[Search] Is array?', Array.isArray(results));
+      console.log('[Search] Length:', results?.length);
+      
+      // Normalize search results to match preview format
+      const normalizedResults = Array.isArray(results) ? results.map((email: any) => ({
+        ...email,
+        // Convert received_on to timestamp if needed
+        timestamp: email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : (email.received_on ? Date.parse(email.received_on) : Date.now())),
+        // Ensure hasAttachments field exists
+        hasAttachments: email.hasAttachments || email.has_attachments || false,
+        // Normalize preview/body field
+        preview: email.preview || email.body || email.snippet || '',
+      })) : [];
+      
+      console.log('[Search] Normalized results count:', normalizedResults.length);
+      console.log('[Search] Normalized results:', normalizedResults);
+      
       setPreviewsMap((prev) => ({
         ...prev,
-        'search_results': results || []
+        'search_results': normalizedResults
       }));
       setSelectedFolder('search_results');
-      setSelectedEmail(null);
-      setViewMode('list');
+      setSelectedEmail(null); // Clear any selected email to prevent random opening
+      // Don't force view mode - let user keep their preference
       setMobileView('list');
-    } catch (e) {
-      console.error("Search failed", e);
-      setError("Failed to search emails. Please try again."); // Hiển thị lỗi
+      
+      // Auto-sync if no results and haven't tried syncing yet
+      if (normalizedResults.length === 0 && !autoSyncAttempted && !skipAutoSync) {
+        console.log('[Search] No results found, attempting auto-sync...');
+        setAutoSyncAttempted(true); // Mark that we've attempted sync before starting
+        try {
+          await mailApi.syncEmailIndex(90, 5);
+          console.log('[Search] Auto-sync completed, waiting for index to be ready...');
+          // Wait a bit for MongoDB index to commit before re-searching
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          console.log('[Search] Re-searching...');
+          // Re-run search after sync, but skip auto-sync to prevent infinite loop
+          // Don't set loading to false yet - keep it true for the re-search
+          await handleSearch(query, true);
+          return; // Exit early to avoid setting loading to false
+        } catch (syncError: any) {
+          console.error('[Search] Auto-sync failed:', syncError);
+          setError(`No results found. Auto-sync failed: ${syncError.response?.data?.detail || syncError.message}`);
+        }
+      } else if (normalizedResults.length === 0) {
+        console.warn('[Search] No results found for query:', query);
+      }
+    } catch (e: any) {
+      console.error("[Search] Failed:", e);
+      console.error("[Search] Error details:", e.response?.data);
+      setError(`Failed to search emails: ${e.response?.data?.detail || e.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -139,31 +182,44 @@ export default function Dashboard() {
   // [Cập nhật] Hàm xóa tìm kiếm và quay về Inbox
   function clearSearch() {
     setSearchParams({}); // Xóa query param trên URL
+    setAutoSyncAttempted(false); // Reset auto-sync flag for next search
     selectFolder('inbox');
   }
 
   const displayList = useMemo(() => {
     let list = previewsMap[selectedFolder] || []
+    
+    console.log(`[displayList] folder: ${selectedFolder}, raw list:`, list); // Debug log
 
     // 1. FILTERING (Lọc)
     if (filterMode === 'unread') {
       list = list.filter((e: any) => e.unread === true)
     } else if (filterMode === 'has-attachment') {
-      list = list.filter((e: any) => (e.attachments && e.attachments.length > 0))
+      // Use hasAttachments field like Kanban view
+      list = list.filter((e: any) => e.hasAttachments === true)
     }
 
     // 2. SORTING (Sắp xếp)
     list = [...list].sort((a: any, b: any) => {
-      const timeA = a.timestamp || (a.receivedOn ? Date.parse(a.receivedOn) : 0)
-      const timeB = b.timestamp || (b.receivedOn ? Date.parse(b.receivedOn) : 0)
-      
-      if (sortMode === 'date-asc') {
-        return timeA - timeB // Cũ nhất trước
+      if (sortMode === 'sender-asc') {
+        // Sort by sender A-Z like Kanban view
+        const senderA = typeof a.sender === 'string' ? a.sender : (a.sender?.name || a.sender?.email || '');
+        const senderB = typeof b.sender === 'string' ? b.sender : (b.sender?.name || b.sender?.email || '');
+        return senderA.toLowerCase().localeCompare(senderB.toLowerCase());
       } else {
-        return timeB - timeA // Mới nhất trước (Mặc định)
+        // Sort by date
+        const timeA = a.timestamp || (a.receivedOn ? Date.parse(a.receivedOn) : 0)
+        const timeB = b.timestamp || (b.receivedOn ? Date.parse(b.receivedOn) : 0)
+        
+        if (sortMode === 'date-asc') {
+          return timeA - timeB // Cũ nhất trước
+        } else {
+          return timeB - timeA // Mới nhất trước (Mặc định)
+        }
       }
     })
 
+    console.log(`[displayList] after filter/sort:`, list); // Debug log
     return list
   }, [previewsMap, selectedFolder, filterMode, sortMode]) // Quan trọng: Phải có dependencies này
 
@@ -1026,7 +1082,9 @@ export default function Dashboard() {
               ) : (
                 <>
                   <div className="email-list-actions d-flex align-items-center justify-content-between mb-2">
-                    <h5 className="m-0 text-white">Project Board</h5>
+                    <h5 className="m-0 text-white">
+                      {selectedFolder === 'search_results' ? `Search Results: "${searchQuery}"` : 'Project Board'}
+                    </h5>
                     <Button 
                       variant="outline-info" 
                       onClick={() => setViewMode('list')}
@@ -1036,7 +1094,10 @@ export default function Dashboard() {
                     </Button>
                   </div>
                   <div className="flex-grow-1" style={{ overflow: 'auto', height: '100%' }}>
-                    <KanbanBoard onOpenEmail={(email) => openEmail(email)} />
+                    <KanbanBoard 
+                      onOpenEmail={(email) => openEmail(email)} 
+                      searchResults={selectedFolder === 'search_results' ? displayList : undefined}
+                    />
                   </div>
                 </>
               )}
@@ -1058,7 +1119,6 @@ export default function Dashboard() {
                   variant="outline-info" 
                   className="me"
                   onClick={() => setViewMode(viewMode === 'list' ? 'kanban' : 'list')}
-                  disabled={selectedFolder === 'search_results'} // Không cho switch kanban khi search
                 >
                   {viewMode === 'list' ? <BsKanban /> : <BsListUl />}
                 </Button>
@@ -1104,6 +1164,7 @@ export default function Dashboard() {
                 >
                   <option value="date-desc">Newest first</option>
                   <option value="date-asc">Oldest first</option>
+                  <option value="sender-asc">Sender (A-Z)</option>
                 </Form.Select>
 
                 {/* Filter Control */}
@@ -1143,6 +1204,7 @@ export default function Dashboard() {
                 {displayList.length === 0 && selectedFolder === 'search_results' ? (
                     <div className="text-center p-4 text-muted">
                       <p>No results found for "{searchQuery}"</p>
+                      {autoSyncAttempted && <p className="small text-warning">Email index has been synced but no matching emails found.</p>}
                       <Button variant="link" onClick={clearSearch}>Return to Inbox</Button>
                     </div>
                 ) : (
