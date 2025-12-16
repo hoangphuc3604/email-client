@@ -34,7 +34,9 @@ import {
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 import { BsKanban, BsListUl } from 'react-icons/bs'; 
+import { AiOutlineClose } from 'react-icons/ai'; // [Cập nhật] Icon đóng
 import KanbanBoard from './KanbanBoard'; 
+import { useSearchParams } from 'react-router-dom'; // [Cập nhật] Hook lấy query param
 
 // Map Gmail label IDs to friendly names
 const LABEL_NAME_MAP: Record<string, string> = {
@@ -87,6 +89,16 @@ export default function Dashboard() {
   const startYRef = useRef(0)
   const scrollStartRef = useRef(0)
   const INITIAL_LOAD_COUNT = 20
+    
+  // Thêm state
+  const [filterMode, setFilterMode] = useState<'all' | 'unread' | 'has-attachment'>('all');
+  const [sortMode, setSortMode] = useState<'date-desc' | 'date-asc' | 'sender-asc'>('date-desc');
+  const [error, setError] = useState<string | null>(null); // Cho F2 Error State
+  const [autoSyncAttempted, setAutoSyncAttempted] = useState(false); // Track if auto-sync was attempted
+  
+  // [Cập nhật] Hook xử lý search query
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchQuery = searchParams.get('q');
 
   useEffect(() => {
     try {
@@ -96,9 +108,120 @@ export default function Dashboard() {
     }
   }, [previewsMap])
 
+  // [Cập nhật] Logic xử lý khi có search query
+  useEffect(() => {
+    if (searchQuery) {
+      handleSearch(searchQuery);
+    }
+  }, [searchQuery]);
+
+  // [Cập nhật] Hàm thực hiện tìm kiếm
+  async function handleSearch(query: string, skipAutoSync: boolean = false) {
+    setLoading(true);
+    setError(null); // Reset lỗi cũ
+    try {
+      console.log('[Search] Calling API with query:', query);
+      const results = await mailApi.searchEmails(query);
+      console.log('[Search] Raw API response:', results);
+      console.log('[Search] Is array?', Array.isArray(results));
+      console.log('[Search] Length:', results?.length);
+      
+      // Normalize search results to match preview format
+      const normalizedResults = Array.isArray(results) ? results.map((email: any) => ({
+        ...email,
+        // Convert received_on to timestamp if needed
+        timestamp: email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : (email.received_on ? Date.parse(email.received_on) : Date.now())),
+        // Ensure hasAttachments field exists
+        hasAttachments: email.hasAttachments || email.has_attachments || false,
+        // Normalize preview/body field
+        preview: email.preview || email.body || email.snippet || '',
+      })) : [];
+      
+      console.log('[Search] Normalized results count:', normalizedResults.length);
+      console.log('[Search] Normalized results:', normalizedResults);
+      
+      setPreviewsMap((prev) => ({
+        ...prev,
+        'search_results': normalizedResults
+      }));
+      setSelectedFolder('search_results');
+      setSelectedEmail(null); // Clear any selected email to prevent random opening
+      // Don't force view mode - let user keep their preference
+      setMobileView('list');
+      
+      // Auto-sync if no results and haven't tried syncing yet
+      if (normalizedResults.length === 0 && !autoSyncAttempted && !skipAutoSync) {
+        console.log('[Search] No results found, attempting auto-sync...');
+        setAutoSyncAttempted(true); // Mark that we've attempted sync before starting
+        try {
+          await mailApi.syncEmailIndex(90, 5);
+          console.log('[Search] Auto-sync completed, waiting for index to be ready...');
+          // Wait a bit for MongoDB index to commit before re-searching
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          console.log('[Search] Re-searching...');
+          // Re-run search after sync, but skip auto-sync to prevent infinite loop
+          // Don't set loading to false yet - keep it true for the re-search
+          await handleSearch(query, true);
+          return; // Exit early to avoid setting loading to false
+        } catch (syncError: any) {
+          console.error('[Search] Auto-sync failed:', syncError);
+          setError(`No results found. Auto-sync failed: ${syncError.response?.data?.detail || syncError.message}`);
+        }
+      } else if (normalizedResults.length === 0) {
+        console.warn('[Search] No results found for query:', query);
+      }
+    } catch (e: any) {
+      console.error("[Search] Failed:", e);
+      console.error("[Search] Error details:", e.response?.data);
+      setError(`Failed to search emails: ${e.response?.data?.detail || e.message || 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // [Cập nhật] Hàm xóa tìm kiếm và quay về Inbox
+  function clearSearch() {
+    setSearchParams({}); // Xóa query param trên URL
+    setAutoSyncAttempted(false); // Reset auto-sync flag for next search
+    selectFolder('inbox');
+  }
+
   const displayList = useMemo(() => {
-    return previewsMap[selectedFolder] || []
-  }, [previewsMap, selectedFolder])
+    let list = previewsMap[selectedFolder] || []
+    
+    console.log(`[displayList] folder: ${selectedFolder}, raw list:`, list); // Debug log
+
+    // 1. FILTERING (Lọc)
+    if (filterMode === 'unread') {
+      list = list.filter((e: any) => e.unread === true)
+    } else if (filterMode === 'has-attachment') {
+      // Use hasAttachments field like Kanban view
+      list = list.filter((e: any) => e.hasAttachments === true)
+    }
+
+    // 2. SORTING (Sắp xếp)
+    list = [...list].sort((a: any, b: any) => {
+      if (sortMode === 'sender-asc') {
+        // Sort by sender A-Z like Kanban view
+        const senderA = typeof a.sender === 'string' ? a.sender : (a.sender?.name || a.sender?.email || '');
+        const senderB = typeof b.sender === 'string' ? b.sender : (b.sender?.name || b.sender?.email || '');
+        return senderA.toLowerCase().localeCompare(senderB.toLowerCase());
+      } else {
+        // Sort by date
+        const timeA = a.timestamp || (a.receivedOn ? Date.parse(a.receivedOn) : 0)
+        const timeB = b.timestamp || (b.receivedOn ? Date.parse(b.receivedOn) : 0)
+        
+        if (sortMode === 'date-asc') {
+          return timeA - timeB // Cũ nhất trước
+        } else {
+          return timeB - timeA // Mới nhất trước (Mặc định)
+        }
+      }
+    })
+
+    console.log(`[displayList] after filter/sort:`, list); // Debug log
+    return list
+  }, [previewsMap, selectedFolder, filterMode, sortMode]) // Quan trọng: Phải có dependencies này
 
   useEffect(() => {
     if (loadingMore === false && scrollTopRef.current > 0 && listRef.current) {
@@ -117,17 +240,26 @@ export default function Dashboard() {
   }, [previewsMap])
 
   function selectFolder(id: string) {
+    // [Cập nhật] Xóa search params khi người dùng chuyển folder thủ công
+    if (id !== 'search_results') {
+      setSearchParams({});
+    }
+
     setSelectedFolder(id)
     setSelectedEmail(null)
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
-    if (!loadedFolders.has(id) || foldersNeedReload.has(id)) {
+    
+    // Không load lại nếu là folder search_results (vì dữ liệu lấy từ API search)
+    if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
       loadFolderData(id, true)
     }
   }
 
   async function loadFolderData(folderId: string, isInitial: boolean = false) {
+    if (folderId === 'search_results') return; // Bỏ qua nếu là search results
+
     if (isInitial) {
       setLoading(true)
     } else {
@@ -176,6 +308,9 @@ export default function Dashboard() {
   }
 
   function loadMoreEmails() {
+    // Không load more cho search results (trừ khi API search hỗ trợ phân trang)
+    if (selectedFolder === 'search_results') return;
+
     const hasMore = hasMoreMap[selectedFolder]
     if (hasMore && !loadingMore) {
       loadFolderData(selectedFolder, false)
@@ -271,8 +406,11 @@ export default function Dashboard() {
       setMailboxes(filtered.length > 0 ? filtered : [])
       setLoadingMailboxes(false)
       
-      const inboxId = 'inbox'
-      await loadFolderData(inboxId, true)
+      // Nếu có query search thì không load inbox mặc định để tránh ghi đè UI
+      if (!searchQuery) {
+        const inboxId = 'inbox'
+        await loadFolderData(inboxId, true)
+      }
     } catch (e) {
       console.error('Error loading mailboxes:', e)
       setMailboxes([])
@@ -524,7 +662,17 @@ export default function Dashboard() {
     
     try {
       await mailApi.modifyEmail(email.id, { starred: !hasStar })
-      await refreshFolder()
+      if (selectedFolder !== 'search_results') {
+          await refreshFolder()
+      } else {
+          // Nếu đang ở search results, cập nhật state local
+          setPreviewsMap((prev) => ({
+             ...prev,
+             search_results: (prev['search_results'] || []).map(e => 
+                 e.id === email.id ? { ...e, labels: hasStar ? [] : ['starred'] } : e // Simplification
+             )
+          }));
+      }
     } catch (e) {
       console.error('Failed to toggle star on backend:', e)
       alert('Failed to update star status')
@@ -532,6 +680,10 @@ export default function Dashboard() {
   }
   
   async function refreshFolder() {
+    if (selectedFolder === 'search_results') {
+        if (searchQuery) handleSearch(searchQuery);
+        return;
+    }
     setSelectedEmail(null)
     setSelectedIds({})
     setMobileView('list')
@@ -905,6 +1057,17 @@ export default function Dashboard() {
                   </ListGroup.Item>
                 ))
               )}
+               {/* [Cập nhật] Hiển thị mục Search Results nếu đang active */}
+               {selectedFolder === 'search_results' && (
+                 <ListGroup.Item action active className="border-top mt-2">
+                    <div className="d-flex justify-content-between align-items-center">
+                      <div><FaInbox className="me-2" /> Search Results</div>
+                      <Button variant="link" className="p-0 text-white" onClick={clearSearch}>
+                        <AiOutlineClose />
+                      </Button>
+                    </div>
+                 </ListGroup.Item>
+              )}
             </ListGroup>
           </Col>
 
@@ -919,7 +1082,9 @@ export default function Dashboard() {
               ) : (
                 <>
                   <div className="email-list-actions d-flex align-items-center justify-content-between mb-2">
-                    <h5 className="m-0 text-white">Project Board</h5>
+                    <h5 className="m-0 text-white">
+                      {selectedFolder === 'search_results' ? `Search Results: "${searchQuery}"` : 'Project Board'}
+                    </h5>
                     <Button 
                       variant="outline-info" 
                       onClick={() => setViewMode('list')}
@@ -929,7 +1094,10 @@ export default function Dashboard() {
                     </Button>
                   </div>
                   <div className="flex-grow-1" style={{ overflow: 'auto', height: '100%' }}>
-                    <KanbanBoard onOpenEmail={(email) => openEmail(email)} />
+                    <KanbanBoard 
+                      onOpenEmail={(email) => openEmail(email)} 
+                      searchResults={selectedFolder === 'search_results' ? displayList : undefined}
+                    />
                   </div>
                 </>
               )}
@@ -937,6 +1105,14 @@ export default function Dashboard() {
           ) : (
             <>
           <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
+             {/* [Cập nhật] Header cho trang kết quả tìm kiếm */}
+             {selectedFolder === 'search_results' && (
+                <div className="alert alert-info py-2 px-3 mb-2 d-flex justify-content-between align-items-center">
+                   <small className="text-truncate" style={{maxWidth: '200px'}}>Results for: <strong>{searchQuery}</strong></small>
+                   <Button variant="outline-info" size="sm" onClick={clearSearch}>Clear</Button>
+                </div>
+              )}
+
             <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Switch View</Tooltip>}>
                 <Button 
@@ -977,6 +1153,35 @@ export default function Dashboard() {
                   <FaEnvelope />
                 </Button>
               </OverlayTrigger>
+              {/* Chèn đoạn này vào bên trên hoặc bên cạnh các nút Action hiện tại */}
+              <div className="d-flex gap-2 mb-2 w-100">
+                {/* Sort Control */}
+                <Form.Select 
+                  size="sm" 
+                  style={{ maxWidth: '150px' }}
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value as any)}
+                >
+                  <option value="date-desc">Newest first</option>
+                  <option value="date-asc">Oldest first</option>
+                  <option value="sender-asc">Sender (A-Z)</option>
+                </Form.Select>
+
+                {/* Filter Control */}
+                <Form.Select 
+                  size="sm" 
+                  style={{ maxWidth: '150px' }}
+                  value={filterMode}
+                  onChange={(e) => setFilterMode(e.target.value as any)}
+                >
+                  <option value="all">All Emails</option>
+                  <option value="unread">Unread Only</option>
+                  <option value="has-attachment">Has Attachments</option>
+                </Form.Select>
+              </div>
+
+              {/* Hiển thị lỗi nếu có (F2 Error State) */}
+              {error && <div className="alert alert-danger p-2 mb-2">{error}</div>}
             </div>
 
             <div 
@@ -995,54 +1200,64 @@ export default function Dashboard() {
                 </div>
               ) : (
               <>
-                <ListGroup variant="flush">
-                  {displayList.map((email: any, idx: number) => {
-                    const id = email.id
-                    const isRead = ('read' in email) ? !!email.read : (email.unread === false)
-                    const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
-                    const subject = email.subject || ''
-                    const preview = email.body || email.preview || ''
-                    const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
-                    const isStarred = ((email.labels || email.tags) || []).includes('starred')
-                    return (
-                      <ListGroup.Item
-                        id={`email-row-${id}`}
-                        key={id}
-                        action
-                        className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
-                        onClick={(e) => {
-                          if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
-                            return
-                          }
-                          setCursorIndex(idx)
-                          openEmail(email)
-                        }}
-                      >
-                        <div className="checkbox-col me-2" onClick={(e) => e.stopPropagation()}>
-                          <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
-                        </div>
-                        <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
-                          {isStarred ? <FaStar /> : <FaRegStar />}
-                        </div>
-                        <div className="meta-col flex-fill">
-                          <div className="row-top d-flex justify-content-between">
-                            <div className="sender">{sender}</div>
-                            <div className="time">{timeAgo(ts)}</div>
+                {/* [Cập nhật] Hiển thị thông báo khi không có kết quả tìm kiếm */}
+                {displayList.length === 0 && selectedFolder === 'search_results' ? (
+                    <div className="text-center p-4 text-muted">
+                      <p>No results found for "{searchQuery}"</p>
+                      {autoSyncAttempted && <p className="small text-warning">Email index has been synced but no matching emails found.</p>}
+                      <Button variant="link" onClick={clearSearch}>Return to Inbox</Button>
+                    </div>
+                ) : (
+                  <ListGroup variant="flush">
+                    {displayList.map((email: any, idx: number) => {
+                      const id = email.id
+                      const isRead = ('read' in email) ? !!email.read : (email.unread === false)
+                      const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
+                      const subject = email.subject || ''
+                      const preview = email.body || email.preview || ''
+                      const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
+                      const isStarred = ((email.labels || email.tags) || []).includes('starred')
+                      return (
+                        <ListGroup.Item
+                          id={`email-row-${id}`}
+                          key={id}
+                          action
+                          className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
+                          onClick={(e) => {
+                            if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
+                              return
+                            }
+                            setCursorIndex(idx)
+                            openEmail(email)
+                          }}
+                        >
+                          <div className="checkbox-col me-2" onClick={(e) => e.stopPropagation()}>
+                            <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
                           </div>
-                          <div className="subject">{subject}</div>
-                          <div className="preview">{preview}</div>
-                        </div>
-                      </ListGroup.Item>
-                    )
-                  })}
-                </ListGroup>
+                          <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
+                            {isStarred ? <FaStar /> : <FaRegStar />}
+                          </div>
+                          <div className="meta-col flex-fill">
+                            <div className="row-top d-flex justify-content-between">
+                              <div className="sender">{sender}</div>
+                              <div className="time">{timeAgo(ts)}</div>
+                            </div>
+                            <div className="subject">{subject}</div>
+                            <div className="preview">{preview}</div>
+                          </div>
+                        </ListGroup.Item>
+                      )
+                    })}
+                  </ListGroup>
+                )}
+                
                 {loadingMore && (
                   <div className="text-center p-3">
                     <FaSync className="fa-spin" size={20} />
                     <small className="ms-2">Loading more...</small>
                   </div>
                 )}
-                {!loadingMore && hasMoreMap[selectedFolder] && (
+                {!loadingMore && hasMoreMap[selectedFolder] && selectedFolder !== 'search_results' && (
                   <div className="text-center p-3">
                     <small className="text-muted">Scroll down for more emails</small>
                   </div>

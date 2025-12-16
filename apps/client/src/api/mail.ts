@@ -101,8 +101,15 @@ const mailApi = {
     return res.data?.data || res.data
   },
 
-  async searchEmails(query: string) {
-    const res = await api.get(`${BASE_ENDPOINT}/search?q=${encodeURIComponent(query)}`)
+  async searchEmails(query: string, mailboxId?: string, page: number = 1, limit: number = 20) {
+    const res = await api.get(`${BASE_ENDPOINT}/search`, {
+      params: {
+        q: query,
+        ...(mailboxId && { mailbox_id: mailboxId }),
+        page,
+        limit
+      }
+    })
     return res.data?.data || res.data
   },
 
@@ -158,6 +165,16 @@ const mailApi = {
 
   async summarizeEmail(emailId: string) {
     const res = await api.post(`${BASE_ENDPOINT}/emails/${emailId}/summarize`)
+    return res.data?.data || res.data
+  },
+
+  async syncEmailIndex(lookbackDays: number = 90, maxPages: number = 5) {
+    const res = await api.post(`${BASE_ENDPOINT}/sync`, null, {
+      params: {
+        lookback_days: lookbackDays,
+        max_pages: maxPages
+      }
+    })
     return res.data?.data || res.data
   },
 }

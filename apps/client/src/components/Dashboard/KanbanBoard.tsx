@@ -7,12 +7,13 @@ import { KANBAN_COLUMNS, useKanbanColumns, useMoveEmail, useSnoozeEmail } from '
 
 interface KanbanBoardProps {
   onOpenEmail: (email: any) => void;
+  searchResults?: any[]; // Optional search results to display instead of regular columns
 }
 
 type SortOption = 'newest' | 'oldest' | 'sender';
 type FilterOption = 'all' | 'unread' | 'attachments';
 
-export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
+export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardProps) {
   const { data: columnsData, isLoading, isError, error } = useKanbanColumns();
   const moveEmail = useMoveEmail();
   const snoozeEmail = useSnoozeEmail();
@@ -198,7 +199,47 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="kanban-scroll-container h-100 px-2" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
           <Row className="flex-nowrap" style={{ minWidth: '100%', height: '100%' }}>
-            {KANBAN_COLUMNS.map((col) => (
+            {/* Search Results Mode - Single Column */}
+            {searchResults ? (
+              <Col 
+                md={12}
+                className="d-flex flex-column"
+                style={{ width: '100%', minWidth: '300px', flex: '0 0 auto' }}
+              >
+                <div className="p-3 mb-3 text-center rounded" style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid #c770f0' }}>
+                  <h5 className="m-0 text-white">Search Results</h5>
+                  <small style={{ color: '#0dcaf0', fontWeight: 'bold' }}>
+                    {getFilteredAndSortedEmails(searchResults).length} / {searchResults.length} cards
+                  </small>
+                </div>
+                
+                <div
+                  className="flex-grow-1 px-1 custom-scrollbar"
+                  style={{ 
+                    overflowY: 'auto', 
+                    minHeight: '200px',
+                    borderRadius: '8px'
+                  }}
+                >
+                  {getFilteredAndSortedEmails(searchResults).map((email: any, index: number) => (
+                    <div key={email.id} style={{ marginBottom: '1rem' }}>
+                      <KanbanCard 
+                        email={email} 
+                        onClick={onOpenEmail}
+                        onSnooze={handleOpenSnooze}
+                      />
+                    </div>
+                  ))}
+                  {getFilteredAndSortedEmails(searchResults).length === 0 && (
+                    <div className="text-center p-4 text-muted">
+                      <p>No emails match the current filters</p>
+                    </div>
+                  )}
+                </div>
+              </Col>
+            ) : (
+              /* Normal Kanban Columns */
+              KANBAN_COLUMNS.map((col) => (
               <Col 
                 key={col.id} 
                 md={3}
@@ -263,7 +304,8 @@ export default function KanbanBoard({ onOpenEmail }: KanbanBoardProps) {
                   )}
                 </Droppable>
               </Col>
-            ))}
+            ))
+            )}
           </Row>
         </div>
       </DragDropContext>
