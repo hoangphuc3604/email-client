@@ -89,7 +89,12 @@ export default function Dashboard() {
   const startYRef = useRef(0)
   const scrollStartRef = useRef(0)
   const INITIAL_LOAD_COUNT = 20
-
+    
+  // Thêm state
+  const [filterMode, setFilterMode] = useState<'all' | 'unread' | 'has-attachment'>('all');
+  const [sortMode, setSortMode] = useState<'date-desc' | 'date-asc'>('date-desc');
+  const [error, setError] = useState<string | null>(null); // Cho F2 Error State
+  
   // [Cập nhật] Hook xử lý search query
   const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('q');
@@ -112,24 +117,20 @@ export default function Dashboard() {
   // [Cập nhật] Hàm thực hiện tìm kiếm
   async function handleSearch(query: string) {
     setLoading(true);
+    setError(null); // Reset lỗi cũ
     try {
-      // Gọi API tìm kiếm
       const results = await mailApi.searchEmails(query);
-      
-      // Lưu kết quả vào một folder ảo tên là 'search_results'
       setPreviewsMap((prev) => ({
         ...prev,
         'search_results': results || []
       }));
-      
-      // Chuyển view sang folder kết quả tìm kiếm
       setSelectedFolder('search_results');
       setSelectedEmail(null);
-      setViewMode('list'); // Yêu cầu hiển thị list dọc cho kết quả search
+      setViewMode('list');
       setMobileView('list');
-      
     } catch (e) {
       console.error("Search failed", e);
+      setError("Failed to search emails. Please try again."); // Hiển thị lỗi
     } finally {
       setLoading(false);
     }
@@ -142,8 +143,29 @@ export default function Dashboard() {
   }
 
   const displayList = useMemo(() => {
-    return previewsMap[selectedFolder] || []
-  }, [previewsMap, selectedFolder])
+    let list = previewsMap[selectedFolder] || []
+
+    // 1. FILTERING (Lọc)
+    if (filterMode === 'unread') {
+      list = list.filter((e: any) => e.unread === true)
+    } else if (filterMode === 'has-attachment') {
+      list = list.filter((e: any) => (e.attachments && e.attachments.length > 0))
+    }
+
+    // 2. SORTING (Sắp xếp)
+    list = [...list].sort((a: any, b: any) => {
+      const timeA = a.timestamp || (a.receivedOn ? Date.parse(a.receivedOn) : 0)
+      const timeB = b.timestamp || (b.receivedOn ? Date.parse(b.receivedOn) : 0)
+      
+      if (sortMode === 'date-asc') {
+        return timeA - timeB // Cũ nhất trước
+      } else {
+        return timeB - timeA // Mới nhất trước (Mặc định)
+      }
+    })
+
+    return list
+  }, [previewsMap, selectedFolder, filterMode, sortMode]) // Quan trọng: Phải có dependencies này
 
   useEffect(() => {
     if (loadingMore === false && scrollTopRef.current > 0 && listRef.current) {
@@ -1071,6 +1093,34 @@ export default function Dashboard() {
                   <FaEnvelope />
                 </Button>
               </OverlayTrigger>
+              {/* Chèn đoạn này vào bên trên hoặc bên cạnh các nút Action hiện tại */}
+              <div className="d-flex gap-2 mb-2 w-100">
+                {/* Sort Control */}
+                <Form.Select 
+                  size="sm" 
+                  style={{ maxWidth: '150px' }}
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value as any)}
+                >
+                  <option value="date-desc">Newest first</option>
+                  <option value="date-asc">Oldest first</option>
+                </Form.Select>
+
+                {/* Filter Control */}
+                <Form.Select 
+                  size="sm" 
+                  style={{ maxWidth: '150px' }}
+                  value={filterMode}
+                  onChange={(e) => setFilterMode(e.target.value as any)}
+                >
+                  <option value="all">All Emails</option>
+                  <option value="unread">Unread Only</option>
+                  <option value="has-attachment">Has Attachments</option>
+                </Form.Select>
+              </div>
+
+              {/* Hiển thị lỗi nếu có (F2 Error State) */}
+              {error && <div className="alert alert-danger p-2 mb-2">{error}</div>}
             </div>
 
             <div 
