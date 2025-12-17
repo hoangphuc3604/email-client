@@ -221,7 +221,7 @@ export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardP
                     borderRadius: '8px'
                   }}
                 >
-                  {getFilteredAndSortedEmails(searchResults).map((email: any, index: number) => (
+                  {getFilteredAndSortedEmails(searchResults).map((email: any) => (
                     <div key={email.id} style={{ marginBottom: '1rem' }}>
                       <KanbanCard 
                         email={email} 
