@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Navbar from "react-bootstrap/Navbar";
 import Nav from "react-bootstrap/Nav";
 import Container from "react-bootstrap/Container";
@@ -36,7 +36,12 @@ function NavBar() {
     }
   }
 
-  window.addEventListener("scroll", scrollHandler);
+  useEffect(() => {
+    window.addEventListener("scroll", scrollHandler);
+    return () => {
+      window.removeEventListener("scroll", scrollHandler);
+    };
+  }, []);
   const navigate = useNavigate()
 
   const user = useAuthStore(s => s.user)
@@ -160,7 +165,7 @@ function NavBar() {
               )
             ) : (
               <Nav.Item className="d-flex align-items-center">
-                <Dropdown align="end" onToggle={(isOpen) => isOpen ? updateExpanded(true) : updateExpanded(false)}>
+                <Dropdown align="end">
                   <Dropdown.Toggle
                     id="user-dropdown"
                     variant="light"
