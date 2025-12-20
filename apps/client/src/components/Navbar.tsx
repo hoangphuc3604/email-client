@@ -173,8 +173,12 @@ function NavBar() {
                   >
                     {(() => {
                       const email = user?.email ?? ''
+                      const name = (user as any)?.name ?? ''
+                      const provider = (user as any)?.provider as ('google' | 'email' | undefined)
+                      const isGoogle = provider === 'google' || (!!user?.picture && !provider)
+                      const displayName = isGoogle ? (name || email) : (name || email)
                       const avatarUrl = user?.picture || user?.avatar
-                      const fallbackInitial = (email || user?.name || '?').charAt(0).toUpperCase()
+                      const fallbackInitial = (displayName || '?').charAt(0).toUpperCase()
                       return (
                         <span className="d-flex align-items-center" style={{ color: '#fff' }}>
                           {avatarUrl ? (
@@ -206,7 +210,7 @@ function NavBar() {
                             </span>
                           )}
                           <span className="ms-2" style={{ fontSize: 13 }}>
-                            {email}
+                            {displayName}
                           </span>
                         </span>
                       )
@@ -214,8 +218,22 @@ function NavBar() {
                   </Dropdown.Toggle>
                   <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
                     <Dropdown.Header>
-                      <span className="text-black-50">Signed in as</span>
-                      <div style={{ fontWeight: 600, color: '#fff' }}>{user?.email}</div>
+                      {(() => {
+                        const email = user?.email ?? ''
+                        const name = (user as any)?.name ?? ''
+                        const provider = (user as any)?.provider as ('google' | 'email' | undefined)
+                        const isGoogle = provider === 'google' || (!!user?.picture && !provider)
+                        const displayName = isGoogle ? (name || email) : (name || email)
+                        return (
+                          <>
+                            <span className="text-white-50">Signed in as</span>
+                            <div style={{ fontWeight: 600, color: '#fff' }}>{displayName}</div>
+                            {email ? (
+                              <div className="text-white-50" style={{ fontSize: 12 }}>{email}</div>
+                            ) : null}
+                          </>
+                        )
+                      })()}
                     </Dropdown.Header>
                     <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
                     <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>

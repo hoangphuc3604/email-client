@@ -6,6 +6,7 @@ type User = {
   name: string
   picture?: string
   avatar?: string
+  provider?: 'google' | 'email'
 } | null
 
 type AuthState = {

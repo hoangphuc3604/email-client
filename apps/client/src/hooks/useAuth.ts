@@ -33,7 +33,7 @@ export function useRegister() {
         setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
       }
-      setUser(user)
+      setUser(user ? { ...user, provider: 'email' } : null)
       qc.invalidateQueries(['me'])
     },
   })
@@ -52,7 +52,7 @@ export function useLogin() {
         setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
       }
-      setUser(user)
+      setUser(user ? { ...user, provider: 'email' } : null)
       qc.invalidateQueries(['me'])
     },
   })
@@ -71,7 +71,7 @@ export function useGoogleLogin() {
         setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
       }
-      setUser(user)
+      setUser(user ? { ...user, provider: 'google' } : null)
       qc.invalidateQueries(['me'])
     },
   })
@@ -90,7 +90,7 @@ export function useGoogleCodeLogin() {
         setAccessToken(accessToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`
       }
-      setUser(user)
+      setUser(user ? { ...user, provider: 'google' } : null)
       qc.invalidateQueries(['me'])
     },
   })
@@ -116,7 +116,9 @@ export function useMe() {
   return useMutation(() => authApi.me(), {
     onSuccess(data) {
       const user = data?.data?.user ?? data?.data ?? data?.user ?? data ?? null
-      setUser(user)
+      // Infer provider when coming from refresh/me
+      const provider = user?.picture ? 'google' : 'email'
+      setUser(user ? { ...user, provider } : null)
     },
   })
 }
