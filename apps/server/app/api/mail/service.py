@@ -322,6 +322,7 @@ class MailService:
     
     try:
       cursor = await self.email_index_collection.aggregate(pipeline)
+      cursor = await self.email_index_collection.aggregate(pipeline)
       docs = await cursor.to_list(length=limit)
       logger.info(f"[SEARCH] Atlas search returned {len(docs)} docs")
     except Exception as e:
