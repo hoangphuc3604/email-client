@@ -14,9 +14,27 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import mimetypes
+import os
+from datetime import datetime
 
 
 logger = logging.getLogger(__name__)
+
+# Setup email HTML logger
+_email_html_logger = logging.getLogger('email_html')
+_email_html_logger.setLevel(logging.INFO)
+_email_html_logger.propagate = False  # Don't propagate to root logger
+
+# Create logs directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
+
+# Create file handler for email HTML logging
+date_str = datetime.now().strftime("%Y-%m-%d")
+_email_html_file_handler = logging.FileHandler(f"logs/email-html-{date_str}.log", encoding='utf-8')
+_email_html_file_handler.setLevel(logging.INFO)
+_email_html_formatter = logging.Formatter('%(asctime)s [EMAIL_HTML] %(message)s')
+_email_html_file_handler.setFormatter(_email_html_formatter)
+_email_html_logger.addHandler(_email_html_file_handler)
 from app.api.mail.models import (
     Mailbox,
     ThreadListResponse,
@@ -675,6 +693,22 @@ class MailService:
               else:
                   body_text = decoded
 
+      processed_html = body_html or f"<pre>{body_text}</pre>"
+      
+      # Log email HTML content for debugging
+      try:
+          _email_html_logger.info(f"\n{'='*80}\n")
+          _email_html_logger.info(f"Email ID: {msg_data['id']}")
+          _email_html_logger.info(f"Subject: {subject}")
+          _email_html_logger.info(f"From: {sender.get('email', 'Unknown')}")
+          _email_html_logger.info(f"Has HTML: {bool(body_html)}")
+          _email_html_logger.info(f"Has Text: {bool(body_text)}")
+          _email_html_logger.info(f"Processed HTML Length: {len(processed_html)}")
+          _email_html_logger.info(f"\n--- PROCESSED HTML CONTENT ---\n{processed_html}\n")
+          _email_html_logger.info(f"{'='*80}\n")
+      except Exception as e:
+          logger.warning(f"Failed to log email HTML for {msg_data['id']}: {e}")
+
       return {
           "id": msg_data['id'],
           "thread_id": msg_data['threadId'],
@@ -687,7 +721,7 @@ class MailService:
           "received_on": received_on,
           "unread": "UNREAD" in label_ids,
           "body": body_text or body_html, # Fallback
-          "processed_html": body_html or f"<pre>{body_text}</pre>",
+          "processed_html": processed_html,
           "decoded_body": body_text,
           "tags": tags,
           "attachments": attachments,
