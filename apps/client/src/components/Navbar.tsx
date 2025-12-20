@@ -2,6 +2,8 @@ import { useState } from "react";
 import Navbar from "react-bootstrap/Navbar";
 import Nav from "react-bootstrap/Nav";
 import Container from "react-bootstrap/Container";
+import Dropdown from "react-bootstrap/Dropdown";
+import Image from "react-bootstrap/Image";
 import logo from "../../public/logo-title.svg";
 import { Link } from "react-router-dom";
 import { useNavigate } from 'react-router-dom'
@@ -134,33 +136,88 @@ function NavBar() {
 
             {!user ? (
               initializing ? null : (
-              <>
-                <Nav.Item>
-                  <Nav.Link
-                    as={Link}
-                    to="/login"
-                    onClick={() => updateExpanded(false)}
-                  >
-                    <AiOutlineUser style={{ marginBottom: "2px" }} /> Sign in
-                  </Nav.Link>
-                </Nav.Item>
+                <>
+                  <Nav.Item>
+                    <Nav.Link
+                      as={Link}
+                      to="/login"
+                      onClick={() => updateExpanded(false)}
+                    >
+                      <AiOutlineUser style={{ marginBottom: "2px" }} /> Sign in
+                    </Nav.Link>
+                  </Nav.Item>
 
-                <Nav.Item>
-                  <Nav.Link
-                    as={Link}
-                    to="/signup"
-                    onClick={() => updateExpanded(false)}
-                  >
-                    <ImBlog style={{ marginBottom: "2px" }} /> Sign up
-                  </Nav.Link>
-                </Nav.Item>
-              </>
+                  <Nav.Item>
+                    <Nav.Link
+                      as={Link}
+                      to="/signup"
+                      onClick={() => updateExpanded(false)}
+                    >
+                      <ImBlog style={{ marginBottom: "2px" }} /> Sign up
+                    </Nav.Link>
+                  </Nav.Item>
+                </>
               )
             ) : (
-              <Nav.Item>
-                <Nav.Link onClick={() => { handleLogout(); updateExpanded(false) }} aria-label="Logout">
-                  <AiOutlineLogout style={{ marginBottom: "2px" }} /> Logout
-                </Nav.Link>
+              <Nav.Item className="d-flex align-items-center">
+                <Dropdown align="end" onToggle={(isOpen) => isOpen ? updateExpanded(true) : updateExpanded(false)}>
+                  <Dropdown.Toggle
+                    id="user-dropdown"
+                    variant="light"
+                    className="d-flex align-items-center border-0 user-pill-toggle"
+                  >
+                    {(() => {
+                      const email = user?.email ?? ''
+                      const avatarUrl = user?.picture || user?.avatar
+                      const fallbackInitial = (email || user?.name || '?').charAt(0).toUpperCase()
+                      return (
+                        <span className="d-flex align-items-center" style={{ color: '#fff' }}>
+                          {avatarUrl ? (
+                            <Image
+                              src={avatarUrl}
+                              alt="avatar"
+                              roundedCircle
+                              width={32}
+                              height={32}
+                              style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
+                            />
+                          ) : (
+                            <span
+                              aria-label="avatar"
+                              style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: '50%',
+                                backgroundColor: 'rgba(255,255,255,0.9)',
+                                color: '#c95bf5',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 600,
+                                border: '2px solid rgba(255,255,255,0.9)'
+                              }}
+                            >
+                              {fallbackInitial}
+                            </span>
+                          )}
+                          <span className="ms-2" style={{ fontSize: 13 }}>
+                            {email}
+                          </span>
+                        </span>
+                      )
+                    })()}
+                  </Dropdown.Toggle>
+                  <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
+                    <Dropdown.Header>
+                      <span className="text-black-50">Signed in as</span>
+                      <div style={{ fontWeight: 600, color: '#fff' }}>{user?.email}</div>
+                    </Dropdown.Header>
+                    <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
+                    <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>
+                      <AiOutlineLogout className="logout-icon-blue" style={{ marginBottom: '2px' }} /> <span className="logout-text-blue">Logout</span>
+                    </Dropdown.Item>
+                  </Dropdown.Menu>
+                </Dropdown>
               </Nav.Item>
             )}
           </Nav>

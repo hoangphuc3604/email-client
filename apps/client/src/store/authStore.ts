@@ -4,6 +4,8 @@ type User = {
   id: string
   email: string
   name: string
+  picture?: string
+  avatar?: string
 } | null
 
 type AuthState = {

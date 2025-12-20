@@ -400,8 +400,84 @@ button:focus {
   padding-left: 15px;
 }
 
+/* --------- */
+/* Purple Dropdown Theme */
+/* --------- */
+.purple-dropdown-menu {
+  background-color: #c95bf5 !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 16px !important;
+  padding: 8px !important;
+  min-width: 240px;
+}
+
+.purple-dropdown-menu .dropdown-header {
+  color: #fff !important;
+}
+
+.purple-dropdown-menu .dropdown-divider {
+  border-top-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.purple-dropdown-item {
+  color: #fff !important;
+}
+
+.purple-dropdown-item:hover,
+.purple-dropdown-item:focus {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  color: #fff !important;
+}
+
+/* Keep Logout text blue even on hover */
+.logout-text-blue {
+  color: #000000 !important; /* Bootstrap primary blue */
+}
+.purple-dropdown-item:hover .logout-text-blue,
+.purple-dropdown-item:focus .logout-text-blue {
+  color: #000000 !important;
+}
+
+/* Make the Logout icon blue and keep it blue on hover */
+.logout-icon-blue {
+  color: #000000 !important;
+}
+.purple-dropdown-item:hover .logout-icon-blue,
+.purple-dropdown-item:focus .logout-icon-blue {
+  color: #000000 !important;
+}
+
 .icon-colour {
   color: #700c86 !important;
+}
+
+/* --------- */
+/* User pill toggle (avatar + email + caret) */
+/* --------- */
+.user-pill-toggle {
+  background-color: #c95bf5 !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 9999px !important;
+  padding: 4px 10px !important; /* approx. py-1 px-2 */
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+.user-pill-toggle:hover,
+.user-pill-toggle:focus,
+.user-pill-toggle:active,
+.show > .user-pill-toggle.dropdown-toggle {
+  background-color: #c95bf5 !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+/* Caret inside the purple pill */
+.user-pill-toggle.dropdown-toggle::after {
+  border-top-color: #fff !important;
+  margin-left: 0.5rem !important;
 }
 
 /* --------- */

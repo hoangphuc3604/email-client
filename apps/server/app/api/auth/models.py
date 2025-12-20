@@ -28,6 +28,7 @@ class UserInfo(CamelModel):
     id: str
     email: str
     name: str
+    picture: Optional[str] = None
 
 class AuthResponse(CamelModel):
     access_token: str

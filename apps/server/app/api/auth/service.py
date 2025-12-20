@@ -78,7 +78,8 @@ class AuthService:
             user=UserInfo(
                 id=str(user["_id"]),
                 email=user["email"],
-                name=user.get("name", user["email"])
+                name=user.get("name", user["email"]),
+                picture=user.get("picture")
             )
         )
     
@@ -106,7 +107,8 @@ class AuthService:
             user=UserInfo(
                 id=str(user["_id"]),
                 email=user["email"],
-                name=user.get("name", user["email"])
+                name=user.get("name", user["email"]),
+                picture=user.get("picture")
             )
         )
     
@@ -164,7 +166,8 @@ class AuthService:
             user=UserInfo(
                 id=str(user["_id"]),
                 email=user["email"],
-                name=user.get("name", email)
+                name=user.get("name", email),
+                picture=user.get("picture")
             )
         )
     
@@ -237,7 +240,8 @@ class AuthService:
         return UserInfo(
             id=str(user["_id"]),
             email=user["email"],
-            name=user.get("name", user["email"])
+            name=user.get("name", user["email"]),
+            picture=user.get("picture")
         )
     
     async def revoke_refresh_token(self, refresh_token: str):
