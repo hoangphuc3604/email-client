@@ -429,12 +429,31 @@ export default function Dashboard() {
       
       const actualMessageId = message.id || message.message_id || email.id
       
+      // Backend returns camelCase (processedHtml) due to Pydantic alias_generator
+      // Check both camelCase and snake_case for compatibility
+      const processedHtml = message.processedHtml || message.processed_html || message.body || message.decoded_body || ''
+      
+      // Log email HTML content for debugging
+      console.log('=== EMAIL HTML DEBUG ===')
+      console.log('Email ID:', email.id)
+      console.log('Subject:', message.subject || message.title || '(No Subject)')
+      console.log('From:', senderStr)
+      console.log('Full message object keys:', Object.keys(message))
+      console.log('Has processedHtml (camelCase):', !!message.processedHtml)
+      console.log('Has processed_html (snake_case):', !!message.processed_html)
+      console.log('Has body:', !!message.body)
+      console.log('Has decoded_body:', !!message.decoded_body)
+      console.log('Processed HTML Length:', processedHtml.length)
+      console.log('Processed HTML Content (first 500 chars):', processedHtml.substring(0, 500))
+      console.log('Full message:', message)
+      console.log('========================')
+      
       setSelectedEmail({
         ...message,
         id: email.id, 
         messageId: actualMessageId, 
         sender: senderStr,
-        body: message.processed_html || message.body || message.decoded_body || '',
+        body: processedHtml,
         subject: message.subject || message.title || '(No Subject)',
         to: message.to || [],
         cc: message.cc || [],
@@ -944,13 +963,45 @@ export default function Dashboard() {
                     try {
                       const doc = iframe.contentDocument || iframe.contentWindow?.document
                       if (doc && doc.body) {
-                        const height = doc.body.scrollHeight
-                        iframe.style.height = Math.max(height + 32, 300) + 'px'
+                        const height = Math.max(
+                          doc.body.scrollHeight,
+                          doc.documentElement.scrollHeight,
+                          doc.body.offsetHeight,
+                          doc.documentElement.offsetHeight,
+                          doc.body.clientHeight,
+                          doc.documentElement.clientHeight
+                        )
+                        iframe.style.height = height + 40 + 'px'
                       }
                     } catch (e) {}
                   }
-                  iframe.onload = resizeIframe
+                  
+                  iframe.onload = () => {
+                    resizeIframe()
+                    setTimeout(resizeIframe, 200)
+                    setTimeout(resizeIframe, 500)
+                    setTimeout(resizeIframe, 1000)
+                  }
+                  
                   setTimeout(resizeIframe, 100)
+                  
+                  const observer = new MutationObserver(() => {
+                    resizeIframe()
+                  })
+                  
+                  setTimeout(() => {
+                    try {
+                      const doc = iframe.contentDocument || iframe.contentWindow?.document
+                      if (doc && doc.body) {
+                        observer.observe(doc.body, {
+                          childList: true,
+                          subtree: true,
+                          attributes: true,
+                          attributeFilter: ['style', 'class']
+                        })
+                      }
+                    } catch (e) {}
+                  }, 500)
                 }
               }}
               srcDoc={`
@@ -976,7 +1027,7 @@ export default function Dashboard() {
                       table { border-collapse: collapse; }
                     </style>
                   </head>
-                  <body>${selectedEmail.body}</body>
+                  <body>${selectedEmail.processedHtml || selectedEmail.processed_html || selectedEmail.body}</body>
                 </html>
               `}
               style={{

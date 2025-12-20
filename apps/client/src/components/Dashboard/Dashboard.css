@@ -1,26 +1,69 @@
-/* Làm cho section dashboard chiếm toàn bộ không gian còn lại */
 .dashboard-section {
   position: relative !important;
-  padding-top: 50px !important; /* Tăng padding để không bị navbar che */
+  width: 100% !important;
+  max-width: 100% !important;
+  padding-top: 50px !important;
   padding-bottom: 30px !important;
-  min-height: 100%; /* Chiều cao tối thiểu */
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  min-height: 100%;
   color: white;
 }
 
-/* Container chính của dashboard */
-.dashboard-container {
-  max-width: 100%;
-  height: calc(85vh - 50px); /* Chiều cao tùy chỉnh */
-  margin-top: 20px;
+.dashboard-section.container-fluid {
+  width: 100% !important;
+  max-width: 100% !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
 
-/* Hàng (Row) chính chứa 3 cột */
+.dashboard-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: calc(85vh - 50px);
+  margin-top: 20px;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.dashboard-container.container {
+  width: 100% !important;
+  max-width: 100% !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
 .dashboard-row {
+  width: 100% !important;
   height: 103%;
-  background-color: rgba(27, 26, 46, 0.8); /* Nền mờ */
+  background-color: rgba(27, 26, 46, 0.8);
   border-radius: 10px;
-  overflow: hidden; /* Ngăn các cột tràn ra ngoài */
+  overflow: hidden;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.dashboard-row.row {
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
 
 /* Định dạng chung cho các cột */
@@ -28,9 +71,29 @@
 .email-list-column,
 .email-detail-column {
   height: 100%;
-  padding: 0;
+  padding: 0 5px !important;
+  margin: 0 !important;
   display: flex;
   flex-direction: column;
+}
+
+.folder-column[class*="col"],
+.email-list-column[class*="col"],
+.email-detail-column[class*="col"] {
+  padding-left: 5px !important;
+  padding-right: 5px !important;
+}
+
+.folder-column:first-child,
+.email-list-column:first-child,
+.email-detail-column:first-child {
+  padding-left: 0 !important;
+}
+
+.folder-column:last-child,
+.email-list-column:last-child,
+.email-detail-column:last-child {
+  padding-right: 0 !important;
 }
 
 .column-title {
@@ -246,7 +309,7 @@
   min-height: 300px;
   background-color: white;
   border-radius: 4px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .email-body-container iframe {
