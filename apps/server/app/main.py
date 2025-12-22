@@ -117,6 +117,9 @@ async def ensure_indexes():
         await email_index.create_index([("received_on", -1)])
         sync_state = db["mail_sync_state"]
         await sync_state.create_index([("user_id", 1)], unique=True)
+        email_embeddings = db["email_embeddings"]
+        await email_embeddings.create_index([("user_id", 1), ("message_id", 1)], unique=True)
+        await email_embeddings.create_index([("user_id", 1)])
     finally:
         await client.close()
 
@@ -152,11 +155,12 @@ async def on_startup():
         run_mail_sync_job,
         "interval",
         minutes=settings.MAIL_SYNC_INTERVAL_MINUTES,
-        next_run_time=None,
+        next_run_time=datetime.now(),
         id="mail_sync_job",
         replace_existing=True,
     )
     scheduler.start()
+    logging.info(f"Scheduler configured: snooze_job every 1 minute; mail_sync_job every {settings.MAIL_SYNC_INTERVAL_MINUTES} minutes (lookback={settings.MAIL_SYNC_LOOKBACK_DAYS} days, max_pages={settings.MAIL_SYNC_MAX_PAGES})")
     print("Scheduler started for Snooze jobs.")
 
 

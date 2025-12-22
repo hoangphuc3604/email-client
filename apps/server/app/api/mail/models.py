@@ -136,6 +136,13 @@ class EmailSearchRequest(CamelModel):
     mailbox_id: Optional[str] = Field(None, description="Filter by mailbox")
 
 
+class SemanticSearchRequest(CamelModel):
+    query: str = Field(..., min_length=1)
+    mailbox_id: Optional[str] = None
+    page: int = Field(1, ge=1)
+    limit: int = Field(20, ge=1, le=100)
+
+
 class SendEmailRequest(CamelModel):
     """Request model for sending an email."""
     to: str
