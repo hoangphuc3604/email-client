@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { Row, Col, Spinner, Modal, Form, Button, ButtonGroup } from 'react-bootstrap';
 import KanbanCard from './KanbanCard';
-import { FaClock, FaFilter, FaSortAmountDown, FaSortAmountUp } from 'react-icons/fa';
+import KanbanSettings, { type KanbanColumnConfig } from './KanbanSettings';
+import { FaClock, FaFilter, FaSortAmountDown, FaSortAmountUp, FaCog } from 'react-icons/fa';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { KANBAN_COLUMNS, useKanbanColumns, useMoveEmail, useSnoozeEmail } from '../../hooks/useKanban';
+import { getKanbanColumns, useKanbanColumns, useMoveEmail, useSnoozeEmail } from '../../hooks/useKanban';
+import { saveColumnConfig } from '../../utils/kanbanConfig';
 
 interface KanbanBoardProps {
   onOpenEmail: (email: any) => void;
@@ -14,13 +16,17 @@ type SortOption = 'newest' | 'oldest' | 'sender';
 type FilterOption = 'all' | 'unread' | 'attachments';
 
 export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardProps) {
-  const { data: columnsData, isLoading, isError, error } = useKanbanColumns();
+  const { data: columnsData, isLoading, isError, error, refetch } = useKanbanColumns();
   const moveEmail = useMoveEmail();
   const snoozeEmail = useSnoozeEmail();
   
   // Filtering & Sorting State
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [filterBy, setFilterBy] = useState<FilterOption>('all');
+  
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [kanbanColumns, setKanbanColumns] = useState(() => getKanbanColumns());
   
   // State cho Snooze Modal
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
@@ -53,6 +59,18 @@ export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardP
     } catch (e) {
       console.error("Snooze failed", e);
       alert("Failed to snooze email.");
+    }
+  };
+
+  const handleSaveSettings = (newColumns: KanbanColumnConfig[]) => {
+    try {
+      saveColumnConfig(newColumns);
+      setKanbanColumns(getKanbanColumns());
+      // Refetch data with new column configuration
+      refetch();
+    } catch (error) {
+      console.error('Failed to save column configuration:', error);
+      alert('Failed to save configuration');
     }
   };
 
@@ -145,7 +163,7 @@ export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardP
     <>
       {/* Filter & Sort Controls */}
       <div className="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div className="d-flex gap-2 align-items-center">
+        <div className="d-flex gap-2 align-items-center flex-wrap">
           <FaFilter className="text-info" />
           <span className="text-white me-2">Filter:</span>
           <ButtonGroup size="sm">
@@ -170,29 +188,42 @@ export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardP
           </ButtonGroup>
         </div>
 
-        <div className="d-flex gap-2 align-items-center">
-          {sortBy === 'newest' ? <FaSortAmountDown className="text-info" /> : <FaSortAmountUp className="text-info" />}
-          <span className="text-white me-2">Sort:</span>
-          <ButtonGroup size="sm">
-            <Button 
-              variant={sortBy === 'newest' ? 'info' : 'outline-info'}
-              onClick={() => setSortBy('newest')}
-            >
-              Date: Newest First
-            </Button>
-            <Button 
-              variant={sortBy === 'oldest' ? 'info' : 'outline-info'}
-              onClick={() => setSortBy('oldest')}
-            >
-              Date: Oldest First
-            </Button>
-            <Button 
-              variant={sortBy === 'sender' ? 'info' : 'outline-info'}
-              onClick={() => setSortBy('sender')}
-            >
-              Sender (A-Z)
-            </Button>
-          </ButtonGroup>
+        <div className="d-flex gap-3 align-items-center flex-wrap">
+          <div className="d-flex gap-2 align-items-center">
+            {sortBy === 'newest' ? <FaSortAmountDown className="text-info" /> : <FaSortAmountUp className="text-info" />}
+            <span className="text-white me-2">Sort:</span>
+            <ButtonGroup size="sm">
+              <Button 
+                variant={sortBy === 'newest' ? 'info' : 'outline-info'}
+                onClick={() => setSortBy('newest')}
+              >
+                Date: Newest First
+              </Button>
+              <Button 
+                variant={sortBy === 'oldest' ? 'info' : 'outline-info'}
+                onClick={() => setSortBy('oldest')}
+              >
+                Date: Oldest First
+              </Button>
+              <Button 
+                variant={sortBy === 'sender' ? 'info' : 'outline-info'}
+                onClick={() => setSortBy('sender')}
+              >
+                Sender (A-Z)
+              </Button>
+            </ButtonGroup>
+          </div>
+          
+          {/* Settings Button */}
+          <Button 
+            variant="outline-light" 
+            size="sm"
+            onClick={() => setShowSettings(true)}
+            className="d-flex align-items-center gap-2"
+            title="Customize Kanban Columns"
+          >
+            <FaCog /> Settings
+          </Button>
         </div>
       </div>
 
@@ -239,7 +270,7 @@ export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardP
               </Col>
             ) : (
               /* Normal Kanban Columns */
-              KANBAN_COLUMNS.map((col) => (
+              kanbanColumns.map((col) => (
               <Col 
                 key={col.id} 
                 md={3}
@@ -350,6 +381,14 @@ export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardP
           </Button>
         </Modal.Footer>
       </Modal>
+
+      {/* Kanban Settings Modal */}
+      <KanbanSettings
+        show={showSettings}
+        onHide={() => setShowSettings(false)}
+        onSave={handleSaveSettings}
+        currentColumns={kanbanColumns}
+      />
     </>
   );
 }
