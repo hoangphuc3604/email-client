@@ -177,6 +177,18 @@ const mailApi = {
     })
     return res.data?.data || res.data
   },
+
+  async getLabels() {
+    const res = await api.get(`${BASE_ENDPOINT}/labels`)
+    return res.data?.data || res.data || []
+  },
+
+  async createLabel(name: string) {
+    const res = await api.post(`${BASE_ENDPOINT}/labels`, null, {
+      params: { name }
+    })
+    return res.data?.data || res.data
+  },
 }
 
 export { mailApi }

@@ -410,3 +410,30 @@ async def sync_email_index(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to sync email index: {str(e)}")
+
+
+@router.get("/labels", response_model=APIResponse[List[dict]])
+async def get_gmail_labels(
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Get all Gmail labels for the authenticated user."""
+    try:
+        labels = await mail_service.get_all_labels(current_user.id)
+        return APIResponse(data=labels, message="Labels retrieved successfully")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/labels", response_model=APIResponse[dict])
+async def create_gmail_label(
+    name: str = Query(..., description="Label name to create"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Create a new Gmail label."""
+    try:
+        label = await mail_service.create_label(current_user.id, name)
+        return APIResponse(data=label, message="Label created successfully")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

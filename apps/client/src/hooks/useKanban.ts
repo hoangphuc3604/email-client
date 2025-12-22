@@ -1,33 +1,43 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import mailApi from '../api/mail'
+import { loadColumnConfig, getGmailLabelForColumn, type KanbanColumnConfig } from '../utils/kanbanConfig'
 
-export type KanbanColumnId = 'inbox' | 'todo' | 'snoozed' | 'done'
+export type KanbanColumnId = string
 
 export interface KanbanColumn {
   id: KanbanColumnId
   title: string
+  gmailLabel: string
 }
 
-export const KANBAN_COLUMNS: KanbanColumn[] = [
-  { id: 'inbox', title: 'Inbox' },
-  { id: 'todo', title: 'To Do' },
-  { id: 'snoozed', title: 'Snoozed' },
-  { id: 'done', title: 'Done' },
-]
+// Load columns from localStorage (dynamic configuration)
+export function getKanbanColumns(): KanbanColumn[] {
+  const config = loadColumnConfig()
+  return config.map(col => ({
+    id: col.id,
+    title: col.title,
+    gmailLabel: col.gmailLabel
+  }))
+}
+
+// Legacy export for backward compatibility
+export const KANBAN_COLUMNS = getKanbanColumns()
 
 type ColumnsData = Record<string, any[]>
 
 async function fetchColumns(): Promise<ColumnsData> {
+  const columns = getKanbanColumns() // Get dynamic columns
   const newData: ColumnsData = {}
   await Promise.all(
-    KANBAN_COLUMNS.map(async (col) => {
+    columns.map(async (col) => {
       try {
-        const res = await mailApi.listEmails(col.id, 10)
+        // Use the Gmail label instead of column ID for the API call
+        const res = await mailApi.listEmails(col.gmailLabel, 10)
         const emails = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
         newData[col.id] = emails
       } catch (e) {
-        console.error(`Error loading column ${col.id}`, e)
+        console.error(`Error loading column ${col.id} (label: ${col.gmailLabel})`, e)
         newData[col.id] = []
       }
     })
@@ -36,6 +46,8 @@ async function fetchColumns(): Promise<ColumnsData> {
 }
 
 export function useKanbanColumns() {
+  const columns = getKanbanColumns() // Get current column configuration
+  
   const query = useQuery<ColumnsData>({
     queryKey: ['kanban', 'columns'],
     queryFn: fetchColumns,
@@ -48,13 +60,13 @@ export function useKanbanColumns() {
   const data = useMemo<ColumnsData>(() => {
     const result = query.data || {}
     // Ensure all columns exist with at least empty arrays
-    KANBAN_COLUMNS.forEach(col => {
+    columns.forEach(col => {
       if (!result[col.id]) {
         result[col.id] = []
       }
     })
     return result
-  }, [query.data])
+  }, [query.data, columns])
 
   return { ...query, data }
 }
@@ -64,7 +76,13 @@ export function useMoveEmail() {
 
   return useMutation(
     async ({ emailId, from, to, index }: { emailId: string; from: KanbanColumnId; to: KanbanColumnId; index: number }) => {
-      await mailApi.modifyEmail(emailId, { labels: [to] })
+      // Get the Gmail label for the destination column
+      const columns = getKanbanColumns()
+      const targetColumn = columns.find(col => col.id === to)
+      const gmailLabel = targetColumn?.gmailLabel || to
+      
+      // Apply the Gmail label
+      await mailApi.modifyEmail(emailId, { labels: [gmailLabel] })
       return { emailId, from, to, index }
     },
     {
