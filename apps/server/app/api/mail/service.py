@@ -6,7 +6,7 @@ from app.config import settings
 from bson import ObjectId
 import email.utils
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Set, Dict, Any
+from typing import Optional, List, Set, Dict, Any, Iterable
 import base64
 import logging
 from email.mime.text import MIMEText
@@ -16,6 +16,9 @@ from email import encoders
 import mimetypes
 import os
 from datetime import datetime
+
+from app.api.mail.semantic_embedding import encode_texts, MODEL_NAME
+from app.api.mail.vector_store import get_vector_store
 
 
 logger = logging.getLogger(__name__)
@@ -53,10 +56,10 @@ class MailService:
   def __init__(self, db: AsyncDatabase):
     self.db = db
     self.users_collection = self.db["users"]
-    self.snoozed_collection = self.db["snoozed_emails"] # Collection mới để lưu trạng thái snooze
+    self.snoozed_collection = self.db["snoozed_emails"]
     self.email_index_collection = self.db["email_index"]
     self.sync_state_collection = self.db["mail_sync_state"]
-    # Lazy init summarizer to avoid raising at import time when key is missing
+    self.email_embeddings_collection = self.db["email_embeddings"]
     self._summarizer: Optional[Summarizer] = None
 
   def _get_summarizer(self) -> Summarizer:
@@ -124,6 +127,13 @@ class MailService:
       "unread": "UNREAD" in label_ids
     }
 
+  def _build_embedding_text(self, doc: Dict[str, Any]) -> str:
+    subject = doc.get("subject") or ""
+    from_name = doc.get("from_name") or ""
+    from_email = doc.get("from_email") or ""
+    snippet = doc.get("snippet") or ""
+    return f"Subject: {subject}\nFrom: {from_name} <{from_email}>\nSnippet: {snippet}"
+
   async def _upsert_index_doc(self, doc: dict):
     now = datetime.utcnow().isoformat()
     doc["updated_at"] = now
@@ -138,6 +148,7 @@ class MailService:
     latest_history_id = start_history_id
     processed: Set[str] = set()
     pages = 0
+    vector_store = get_vector_store()
     while pages < max_pages:
       history_request = service.users().history().list(
         userId='me',
@@ -151,6 +162,7 @@ class MailService:
       histories = history_response.get('history', [])
       for record in histories:
         latest_history_id = record.get('id', latest_history_id)
+        batch_docs: List[Dict[str, Any]] = []
         for msg_entry in record.get('messages', []):
           msg_id = msg_entry.get('id')
           if not msg_id or msg_id in processed:
@@ -160,6 +172,7 @@ class MailService:
             msg_data = service.users().messages().get(userId='me', id=msg_id, format='metadata').execute()
             doc = self._parse_message_for_index(msg_data, user_id)
             await self._upsert_index_doc(doc)
+            batch_docs.append(doc)
           except Exception:
             continue
         for added in record.get('messagesAdded', []):
@@ -172,8 +185,10 @@ class MailService:
             msg_data = service.users().messages().get(userId='me', id=msg_id, format='metadata').execute()
             doc = self._parse_message_for_index(msg_data, user_id)
             await self._upsert_index_doc(doc)
+            batch_docs.append(doc)
           except Exception:
             continue
+        await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
       page_token = history_response.get('nextPageToken')
       pages += 1
       if not page_token:
@@ -186,6 +201,7 @@ class MailService:
     page_token = None
     pages = 0
     latest_history_id = None
+    vector_store = get_vector_store()
     while pages < max_pages:
       try:
         results = service.users().messages().list(
@@ -198,6 +214,7 @@ class MailService:
       except Exception:
         break
       messages = results.get('messages', [])
+      batch_docs: List[Dict[str, Any]] = []
       for msg in messages:
         try:
           msg_data = service.users().messages().get(
@@ -208,8 +225,10 @@ class MailService:
           latest_history_id = msg_data.get('historyId') or latest_history_id
           doc = self._parse_message_for_index(msg_data, user_id)
           await self._upsert_index_doc(doc)
+          batch_docs.append(doc)
         except Exception:
           continue
+      await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
       page_token = results.get('nextPageToken')
       pages += 1
       if not page_token:
@@ -235,6 +254,62 @@ class MailService:
         {"$set": {"user_id": user_id, "history_id": latest_history_id, "updated_at": datetime.utcnow().isoformat()}},
         upsert=True
       )
+
+  async def _upsert_embeddings_batch(self, user_id: str, docs: Iterable[Dict[str, Any]], vector_store) -> None:
+    docs_list = [d for d in docs if d.get("message_id")]
+    if not docs_list:
+      return
+    texts = [self._build_embedding_text(d) for d in docs_list]
+    embeddings = encode_texts(texts)
+    now = datetime.utcnow().isoformat()
+    items: List[Dict[str, Any]] = []
+    operations = []
+    for doc, emb in zip(docs_list, embeddings):
+      message_id = doc["message_id"]
+      labels = doc.get("labels") or []
+      labels_str = ("," + ",".join(labels) + ",") if isinstance(labels, list) and labels else ("," + str(labels) + "," if labels else "")
+      items.append(
+        {
+          "message_id": message_id,
+          "embedding": emb,
+          "metadata": {
+            "labels": labels_str,
+            "model": MODEL_NAME,
+            "updated_at": now,
+          },
+        }
+      )
+      operations.append(
+        {
+          "filter": {"user_id": user_id, "message_id": message_id},
+          "update": {
+            "$set": {
+              "user_id": user_id,
+              "message_id": message_id,
+              "embedding": emb,
+              "model": MODEL_NAME,
+              "labels": labels,
+              "updated_at": now,
+            },
+            "$setOnInsert": {"created_at": now},
+          },
+          "upsert": True,
+        }
+      )
+    if operations:
+      requests = [
+        (
+          self.email_embeddings_collection.update_one(
+            op["filter"],
+            op["update"],
+            upsert=op["upsert"],
+          )
+        )
+        for op in operations
+      ]
+      for req in requests:
+        await req
+    vector_store.upsert(user_id, items)
 
   def _build_search_pipeline(self, query: str, user_id: str, mailbox_label_id: Optional[str], limit: int, page: int) -> List[dict]:
     skip = (page - 1) * limit
@@ -368,6 +443,128 @@ class MailService:
     
     logger.info(f"[SEARCH] Returning {len(results)} results")
     return results
+
+  async def search_emails_semantic(self, user_id: str, query: str, mailbox_id: Optional[str], page: int, limit: int):
+    logger.info(f"[SEMANTIC SEARCH] user_id={user_id}, query='{query}', mailbox_id={mailbox_id}, page={page}, limit={limit}")
+    mailbox_label_id: Optional[str] = None
+    if mailbox_id:
+      try:
+        service = await self.get_gmail_service(user_id)
+        mailbox_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
+      except Exception as e:
+        logger.warning(f"[SEMANTIC SEARCH] Failed to resolve mailbox label id: {e}")
+    query_embedding = encode_texts([query])[0]
+    vector_store = get_vector_store()
+    top_k = page * limit + 10
+    search_label = f",{mailbox_label_id}," if mailbox_label_id else None
+    
+    # Query vector store (filtering by label is done in Python now)
+    scored = vector_store.query(user_id, query_embedding, top_k, search_label)
+    
+    if not scored:
+      logger.info("[SEMANTIC SEARCH] No vectors found, attempting lazy rebuild from Mongo")
+      await self._rebuild_semantic_index_for_user(user_id)
+      scored = vector_store.query(user_id, query_embedding, top_k, search_label)
+      if not scored:
+        logger.info("[SEMANTIC SEARCH] No vectors after rebuild, returning empty result")
+        return []
+        
+    # Filter by label in Python if needed
+    if search_label:
+      filtered_scored = []
+      for m_id, score, meta in scored:
+        labels_str = meta.get("labels", "")
+        if search_label in labels_str:
+          filtered_scored.append((m_id, score, meta))
+      scored = filtered_scored
+      
+    # Sort by score descending to ensure best matches are first
+    scored.sort(key=lambda x: x[1], reverse=True)
+      
+    message_ids = [m_id for m_id, _, _ in scored]
+    unique_ids = list(dict.fromkeys(message_ids))
+    cursor = self.email_index_collection.find(
+      {"user_id": user_id, "message_id": {"$in": unique_ids}}
+    )
+    docs = await cursor.to_list(length=len(unique_ids))
+    doc_by_id = {d.get("message_id"): d for d in docs}
+    ordered_docs = [doc_by_id[m_id] for m_id in unique_ids if m_id in doc_by_id]
+    start = (page - 1) * limit
+    end = start + limit
+    page_docs = ordered_docs[start:end]
+    results = []
+    for doc in page_docs:
+      labels = doc.get("labels", [])
+      results.append(
+        {
+          "id": doc.get("message_id"),
+          "history_id": doc.get("history_id"),
+          "subject": doc.get("subject", "(No Subject)"),
+          "sender": {
+            "name": doc.get("from_name") or "",
+            "email": doc.get("from_email") or "",
+          },
+          "to": doc.get("to", []),
+          "received_on": doc.get("received_on") or "",
+          "unread": doc.get("unread", False),
+          "tags": [{"id": l, "name": l} for l in labels],
+          "body": doc.get("snippet", "")[:150],
+          "has_attachments": doc.get("has_attachments", False),
+        }
+      )
+    logger.info(f"[SEMANTIC SEARCH] Returning {len(results)} results")
+    return results
+
+  async def _rebuild_semantic_index_for_user(self, user_id: str, mailbox_id: Optional[str] = None) -> None:
+    vector_store = get_vector_store()
+    if vector_store.count(user_id) > 0:
+      return
+    
+    filter_query: Dict[str, Any] = {"user_id": user_id}
+    if mailbox_id:
+      filter_query["labels"] = mailbox_id
+      
+    # Check if we have embeddings in Mongo
+    count = await self.email_embeddings_collection.count_documents(filter_query)
+    
+    if count > 0:
+      cursor = self.email_embeddings_collection.find(filter_query)
+      batch: List[Dict[str, Any]] = []
+      async for doc in cursor:
+        message_id = doc.get("message_id")
+        embedding = doc.get("embedding")
+        labels = doc.get("labels") or []
+        model = doc.get("model") or MODEL_NAME
+        if not message_id or not embedding:
+          continue
+        labels_str = ("," + ",".join(labels) + ",") if isinstance(labels, list) and labels else ("," + str(labels) + "," if labels else "")
+        batch.append(
+          {
+            "message_id": message_id,
+            "embedding": embedding,
+            "metadata": {
+              "labels": labels_str,
+              "model": model
+            },
+          }
+        )
+        if len(batch) >= 256:
+          vector_store.upsert(user_id, batch)
+          batch = []
+      if batch:
+        vector_store.upsert(user_id, batch)
+    else:
+      # Fallback: Generate embeddings from email_index if missing
+      logger.info(f"[SEMANTIC REBUILD] No embeddings found for user {user_id}, generating from emails...")
+      email_cursor = self.email_index_collection.find(filter_query)
+      batch_docs = []
+      async for doc in email_cursor:
+        batch_docs.append(doc)
+        if len(batch_docs) >= 50:
+          await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
+          batch_docs = []
+      if batch_docs:
+        await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
 
   async def sync_all_users(self, mailbox_id: Optional[str] = None):
     cursor = self.users_collection.find({"google_refresh_token": {"$exists": True}})

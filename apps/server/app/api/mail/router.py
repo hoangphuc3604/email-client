@@ -6,7 +6,7 @@ from app.api.auth.dependencies import get_current_user
 from app.api.auth.models import UserInfo
 from app.api.mail.service import MailService
 from app.api.mail.dependencies import get_mail_service
-from app.api.mail.models import SnoozeEmailRequest
+from app.api.mail.models import SnoozeEmailRequest, SemanticSearchRequest
 
 logger = logging.getLogger(__name__)
 from app.api.mail.models import (
@@ -331,6 +331,27 @@ async def search_emails(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to search emails: {str(e)}")
+
+
+@router.post("/search/semantic", response_model=APIResponse[List[ThreadPreview]])
+async def search_emails_semantic(
+    payload: SemanticSearchRequest,
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user),
+):
+    try:
+        results = await mail_service.search_emails_semantic(
+            current_user.id,
+            payload.query,
+            payload.mailbox_id,
+            payload.page,
+            payload.limit,
+        )
+        return APIResponse(data=results, message="Semantic search completed successfully")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search: {str(e)}")
 
 
 @router.post("/emails/{email_id}/summarize", response_model=APIResponse[dict])
