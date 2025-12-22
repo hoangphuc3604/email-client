@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import mailApi from '../api/mail'
-import { loadColumnConfig, getGmailLabelForColumn, type KanbanColumnConfig } from '../utils/kanbanConfig'
+import { loadColumnConfig } from '../utils/kanbanConfig'
 
 export type KanbanColumnId = string
 
