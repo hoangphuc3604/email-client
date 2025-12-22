@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app.api.auth.router import router as auth_router
 from app.api.mail.router import router as mail_router
 from app.api.mail.mock_router import router as mock_mail_router
+from app.api.kanban.router import router as kanban_router
 
 router = APIRouter()
 
@@ -11,4 +12,5 @@ router = APIRouter()
 router.include_router(auth_router)
 router.include_router(mail_router)
 router.include_router(mock_mail_router)
+router.include_router(kanban_router)
 
