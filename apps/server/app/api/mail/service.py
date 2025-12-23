@@ -279,53 +279,24 @@ class MailService:
     embeddings = encode_texts(texts)
     now = datetime.utcnow().isoformat()
     items: List[Dict[str, Any]] = []
-    operations = []
+    
     for doc, emb in zip(docs_list, embeddings):
       message_id = doc["message_id"]
       labels = doc.get("labels") or []
-      labels_str = ("," + ",".join(labels) + ",") if isinstance(labels, list) and labels else ("," + str(labels) + "," if labels else "")
       items.append(
         {
           "message_id": message_id,
           "embedding": emb,
           "metadata": {
-            "labels": labels_str,
+            "labels": labels if isinstance(labels, list) else [labels],
             "model": MODEL_NAME,
             "updated_at": now,
           },
         }
       )
-      operations.append(
-        {
-          "filter": {"user_id": user_id, "message_id": message_id},
-          "update": {
-            "$set": {
-              "user_id": user_id,
-              "message_id": message_id,
-              "embedding": emb,
-              "model": MODEL_NAME,
-              "labels": labels,
-              "updated_at": now,
-            },
-            "$setOnInsert": {"created_at": now},
-          },
-          "upsert": True,
-        }
-      )
-    if operations:
-      requests = [
-        (
-          self.email_embeddings_collection.update_one(
-            op["filter"],
-            op["update"],
-            upsert=op["upsert"],
-          )
-        )
-        for op in operations
-      ]
-      for req in requests:
-        await req
-    vector_store.upsert(user_id, items)
+    
+    if items:
+      vector_store.upsert(user_id, items)
 
   def _build_search_pipeline(self, query: str, user_id: str, mailbox_label_id: Optional[str], limit: int, page: int) -> List[dict]:
     skip = (page - 1) * limit
@@ -472,28 +443,16 @@ class MailService:
     query_embedding = encode_texts([query])[0]
     vector_store = get_vector_store()
     top_k = page * limit + 10
-    search_label = f",{mailbox_label_id}," if mailbox_label_id else None
-    
-    # Query vector store (filtering by label is done in Python now)
-    scored = vector_store.query(user_id, query_embedding, top_k, search_label)
+    scored = vector_store.query(user_id, query_embedding, top_k, mailbox_label_id)
     
     if not scored:
       logger.info("[SEMANTIC SEARCH] No vectors found, attempting lazy rebuild from Mongo")
       await self._rebuild_semantic_index_for_user(user_id)
-      scored = vector_store.query(user_id, query_embedding, top_k, search_label)
+      scored = vector_store.query(user_id, query_embedding, top_k, mailbox_label_id)
       if not scored:
         logger.info("[SEMANTIC SEARCH] No vectors after rebuild, returning empty result")
         return []
         
-    # Filter by label in Python if needed
-    if search_label:
-      filtered_scored = []
-      for m_id, score, meta in scored:
-        labels_str = meta.get("labels", "")
-        if search_label in labels_str:
-          filtered_scored.append((m_id, score, meta))
-      scored = filtered_scored
-      
     # Sort by score descending to ensure best matches are first
     scored.sort(key=lambda x: x[1], reverse=True)
       
@@ -540,47 +499,17 @@ class MailService:
     if mailbox_id:
       filter_query["labels"] = mailbox_id
       
-    # Check if we have embeddings in Mongo
-    count = await self.email_embeddings_collection.count_documents(filter_query)
-    
-    if count > 0:
-      cursor = self.email_embeddings_collection.find(filter_query)
-      batch: List[Dict[str, Any]] = []
-      async for doc in cursor:
-        message_id = doc.get("message_id")
-        embedding = doc.get("embedding")
-        labels = doc.get("labels") or []
-        model = doc.get("model") or MODEL_NAME
-        if not message_id or not embedding:
-          continue
-        labels_str = ("," + ",".join(labels) + ",") if isinstance(labels, list) and labels else ("," + str(labels) + "," if labels else "")
-        batch.append(
-          {
-            "message_id": message_id,
-            "embedding": embedding,
-            "metadata": {
-              "labels": labels_str,
-              "model": model
-            },
-          }
-        )
-        if len(batch) >= 256:
-          vector_store.upsert(user_id, batch)
-          batch = []
-      if batch:
-        vector_store.upsert(user_id, batch)
-    else:
-      # Fallback: Generate embeddings from email_index if missing
-      logger.info(f"[SEMANTIC REBUILD] No embeddings found for user {user_id}, generating from emails...")
-      email_cursor = self.email_index_collection.find(filter_query)
-      batch_docs = []
-      async for doc in email_cursor:
-        batch_docs.append(doc)
-        if len(batch_docs) >= 50:
-          await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
-          batch_docs = []
-      if batch_docs:
+    # Directly generate embeddings from email_index
+    logger.info(f"[SEMANTIC REBUILD] Generating embeddings for user {user_id} from emails...")
+    email_cursor = self.email_index_collection.find(filter_query)
+    batch_docs = []
+    async for doc in email_cursor:
+      batch_docs.append(doc)
+      if len(batch_docs) >= 50:
         await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
+        batch_docs = []
+    if batch_docs:
+      await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
 
   async def sync_all_users(self, mailbox_id: Optional[str] = None):
     cursor = self.users_collection.find({"google_refresh_token": {"$exists": True}})

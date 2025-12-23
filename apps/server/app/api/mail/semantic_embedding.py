@@ -5,6 +5,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 
+# Using a multilingual model to support Vietnamese better
 MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
@@ -13,7 +14,7 @@ def _get_model() -> SentenceTransformer:
     return SentenceTransformer(MODEL_NAME, trust_remote_code=False)
 
 
-def encode_texts(texts: Iterable[str], batch_size: int = 32) -> List[List[float]]:
+def encode_texts(texts: Iterable[str], batch_size: int = 16) -> List[List[float]]:
     data = list(texts)
     if not data:
         return []
