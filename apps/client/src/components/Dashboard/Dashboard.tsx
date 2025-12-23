@@ -121,7 +121,19 @@ export default function Dashboard() {
     setError(null); // Reset lỗi cũ
     try {
       console.log('[Search] Calling API with query:', query);
-      const results = await mailApi.searchEmails(query);
+      console.log('[Search] Attempting Semantic Search with query:', query);
+      
+      // 1. Ưu tiên gọi Semantic Search (Tìm kiếm thông minh)
+      let results = await mailApi.searchEmailsSemantic(query);
+      
+      // 2. [QUAN TRỌNG] Logic Fallback: 
+      // Nếu Semantic Search không trả về kết quả nào, ta gọi lại Search cũ (Keyword Search)
+      if (!results || (Array.isArray(results) && results.length === 0)) {
+          console.log('[Search] Semantic search returned 0 results. Falling back to Standard Keyword Search...');
+          results = await mailApi.searchEmails(query);
+      }
+
+      console.log('[Search] Final results:', results);
       console.log('[Search] Raw API response:', results);
       console.log('[Search] Is array?', Array.isArray(results));
       console.log('[Search] Length:', results?.length);

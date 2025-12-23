@@ -101,6 +101,19 @@ const mailApi = {
     return res.data?.data || res.data
   },
 
+  async searchEmailsSemantic(query: string, mailboxId?: string, page: number = 1, limit: number = 20) {
+    // Matches the SemanticSearchRequest model in backend
+    const payload = {
+      query,
+      mailbox_id: mailboxId,
+      page,
+      limit
+    }
+    
+    const res = await api.post(`${BASE_ENDPOINT}/search/semantic`, payload)
+    return res.data?.data || res.data
+  },
+
   async searchEmails(query: string, mailboxId?: string, page: number = 1, limit: number = 20) {
     const res = await api.get(`${BASE_ENDPOINT}/search`, {
       params: {
