@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     MAIL_SYNC_INTERVAL_MINUTES: int = 10
     MAIL_SYNC_LOOKBACK_DAYS: int = 90
     MAIL_SYNC_MAX_PAGES: int = 5
-    VECTOR_DB_PATH: str = "chroma_data"
+    QDRANT_URL: str = ""
+    QDRANT_API_KEY: str = ""
+    QDRANT_COLLECTION: str = "emails"
 
     model_config = SettingsConfigDict(env_file=".env.local")
 
