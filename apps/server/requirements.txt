@@ -9,7 +9,7 @@ pytest==8.4.1
 pytest-asyncio==1.1.0
 uvicorn[standard]==0.32.1
 google-auth==2.35.0
-google-auth-oauthlib==1.2.1`
+google-auth-oauthlib==1.2.1
 cryptography==46.0.1
 google-api-python-client==2.155.0
 apscheduler==3.10.4
