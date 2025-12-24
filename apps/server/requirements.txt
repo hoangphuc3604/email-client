@@ -14,5 +14,6 @@ cryptography==46.0.1
 google-api-python-client==2.155.0
 apscheduler==3.10.4
 langchain-google-genai==2.0.4
+# sentence-transformers will use PyTorch CPU installed in build.sh
 sentence-transformers==3.0.1
 qdrant-client==1.12.1
