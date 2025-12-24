@@ -1,38 +1,24 @@
-from functools import lru_cache
 from typing import Iterable, List
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from app.config import settings
 
-import numpy as np
-from sentence_transformers import SentenceTransformer
+MODEL_NAME = "models/text-embedding-004"
 
-
-# Using a multilingual model to support Vietnamese better
-MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-
-@lru_cache(maxsize=1)
-def _get_model() -> SentenceTransformer:
-    return SentenceTransformer(MODEL_NAME, trust_remote_code=False)
-
+def _get_model() -> GoogleGenerativeAIEmbeddings:
+    return GoogleGenerativeAIEmbeddings(
+        model=MODEL_NAME,
+        google_api_key=settings.GEMINI_API_KEY
+    )
 
 def encode_texts(texts: Iterable[str], batch_size: int = 16) -> List[List[float]]:
     data = list(texts)
     if not data:
         return []
     model = _get_model()
-    embeddings = model.encode(
-        data,
-        batch_size=batch_size,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=False,
-    )
-    if isinstance(embeddings, np.ndarray):
-        return embeddings.astype("float32").tolist()
-    return [np.asarray(e, dtype="float32").tolist() for e in embeddings]
-
+    embeddings = model.embed_documents(data)
+    return embeddings
 
 def embedding_dimension() -> int:
-    model = _get_model()
-    return int(model.get_sentence_embedding_dimension())
+    return 768
 
 

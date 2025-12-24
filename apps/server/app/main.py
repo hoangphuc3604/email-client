@@ -115,6 +115,7 @@ async def ensure_indexes():
         email_index = db["email_index"]
         await email_index.create_index([("user_id", 1), ("message_id", 1)], unique=True)
         await email_index.create_index([("received_on", -1)])
+        await email_index.create_index([("is_embedded", 1), ("received_on", -1)])
         sync_state = db["mail_sync_state"]
         await sync_state.create_index([("user_id", 1)], unique=True)
         email_embeddings = db["email_embeddings"]
@@ -146,6 +147,17 @@ async def run_mail_sync_job():
         await client.close()
 
 
+async def run_embedding_job():
+    """Periodic job to generate embeddings for new emails."""
+    client = AsyncMongoClient(settings.DB_CONNECTION_STRING)
+    try:
+        db = client[settings.DB_NAME]
+        mail_service = MailService(db)
+        await mail_service.process_embedding_queue()
+    finally:
+        await client.close()
+
+
 @app.on_event("startup")
 async def on_startup():
     # Initialize indexes and start scheduler
@@ -159,8 +171,16 @@ async def on_startup():
         id="mail_sync_job",
         replace_existing=True,
     )
+    scheduler.add_job(
+        run_embedding_job,
+        "interval",
+        minutes=settings.EMBEDDING_JOB_INTERVAL_MINUTES,
+        next_run_time=datetime.now(),
+        id="embedding_job",
+        replace_existing=True,
+    )
     scheduler.start()
-    logging.info(f"Scheduler configured: snooze_job every 1 minute; mail_sync_job every {settings.MAIL_SYNC_INTERVAL_MINUTES} minutes (lookback={settings.MAIL_SYNC_LOOKBACK_DAYS} days, max_pages={settings.MAIL_SYNC_MAX_PAGES})")
+    logging.info(f"Scheduler configured: snooze_job every 1 minute; mail_sync_job every {settings.MAIL_SYNC_INTERVAL_MINUTES} minutes; embedding_job every {settings.EMBEDDING_JOB_INTERVAL_MINUTES} minutes")
     print("Scheduler started for Snooze jobs.")
 
 

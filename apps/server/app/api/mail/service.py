@@ -23,15 +23,12 @@ from app.api.mail.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
 
-# Setup email HTML logger
 _email_html_logger = logging.getLogger('email_html')
 _email_html_logger.setLevel(logging.INFO)
-_email_html_logger.propagate = False  # Don't propagate to root logger
+_email_html_logger.propagate = False
 
-# Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
 
-# Create file handler for email HTML logging
 date_str = datetime.now().strftime("%Y-%m-%d")
 _email_html_file_handler = logging.FileHandler(f"logs/email-html-{date_str}.log", encoding='utf-8')
 _email_html_file_handler.setLevel(logging.INFO)
@@ -71,7 +68,6 @@ class MailService:
     if not mailbox_id:
       return None
     
-    # System labels must be uppercase
     system_labels_map = {
         'inbox': 'INBOX',
         'sent': 'SENT',
@@ -84,24 +80,20 @@ class MailService:
         'unread': 'UNREAD'
     }
     
-    # Check if it's a system label (case-insensitive)
     gmail_label_id = system_labels_map.get(mailbox_id.lower())
     if gmail_label_id:
       return gmail_label_id
     
-    # For user labels, find by exact name match (case-insensitive)
     try:
       results = service.users().labels().list(userId='me').execute()
       labels = results.get('labels', [])
       
-      # Special handling for common names
       search_name = mailbox_id
       if mailbox_id.lower() == 'todo':
         search_name = 'To Do'
       elif mailbox_id.lower() == 'done':
         search_name = 'Done'
       
-      # Find matching label (case-insensitive comparison)
       for label in labels:
         if label['name'].lower() == search_name.lower():
           gmail_label_id = label['id']
@@ -140,7 +132,8 @@ class MailService:
       "received_on": received_on,
       "labels": label_ids,
       "to": to_list,
-      "unread": "UNREAD" in label_ids
+      "unread": "UNREAD" in label_ids,
+      "is_embedded": False
     }
 
   def _build_embedding_text(self, doc: Dict[str, Any]) -> str:
@@ -164,7 +157,6 @@ class MailService:
     latest_history_id = start_history_id
     processed: Set[str] = set()
     pages = 0
-    vector_store = get_vector_store()
     while pages < max_pages:
       history_request = service.users().history().list(
         userId='me',
@@ -178,7 +170,6 @@ class MailService:
       histories = history_response.get('history', [])
       for record in histories:
         latest_history_id = record.get('id', latest_history_id)
-        batch_docs: List[Dict[str, Any]] = []
         for msg_entry in record.get('messages', []):
           msg_id = msg_entry.get('id')
           if not msg_id or msg_id in processed:
@@ -188,7 +179,6 @@ class MailService:
             msg_data = service.users().messages().get(userId='me', id=msg_id, format='metadata').execute()
             doc = self._parse_message_for_index(msg_data, user_id)
             await self._upsert_index_doc(doc)
-            batch_docs.append(doc)
           except Exception:
             continue
         for added in record.get('messagesAdded', []):
@@ -201,10 +191,8 @@ class MailService:
             msg_data = service.users().messages().get(userId='me', id=msg_id, format='metadata').execute()
             doc = self._parse_message_for_index(msg_data, user_id)
             await self._upsert_index_doc(doc)
-            batch_docs.append(doc)
           except Exception:
             continue
-        await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
       page_token = history_response.get('nextPageToken')
       pages += 1
       if not page_token:
@@ -217,7 +205,6 @@ class MailService:
     page_token = None
     pages = 0
     latest_history_id = None
-    vector_store = get_vector_store()
     while pages < max_pages:
       try:
         results = service.users().messages().list(
@@ -230,7 +217,6 @@ class MailService:
       except Exception:
         break
       messages = results.get('messages', [])
-      batch_docs: List[Dict[str, Any]] = []
       for msg in messages:
         try:
           msg_data = service.users().messages().get(
@@ -241,10 +227,8 @@ class MailService:
           latest_history_id = msg_data.get('historyId') or latest_history_id
           doc = self._parse_message_for_index(msg_data, user_id)
           await self._upsert_index_doc(doc)
-          batch_docs.append(doc)
         except Exception:
           continue
-      await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
       page_token = results.get('nextPageToken')
       pages += 1
       if not page_token:
@@ -405,7 +389,6 @@ class MailService:
       docs = await self.email_index_collection.find(fallback_query).sort("received_on", -1).limit(limit).to_list(length=limit)
       logger.info(f"[SEARCH] Fallback search returned {len(docs)} docs")
     
-    # Check if email_index_collection has any data at all
     total_count = await self.email_index_collection.count_documents({"user_id": user_id})
     logger.info(f"[SEARCH] Total emails in index for user: {total_count}")
     
@@ -453,7 +436,6 @@ class MailService:
         logger.info("[SEMANTIC SEARCH] No vectors after rebuild, returning empty result")
         return []
         
-    # Sort by score descending to ensure best matches are first
     scored.sort(key=lambda x: x[1], reverse=True)
       
     message_ids = [m_id for m_id, _, _ in scored]
@@ -499,7 +481,6 @@ class MailService:
     if mailbox_id:
       filter_query["labels"] = mailbox_id
       
-    # Directly generate embeddings from email_index
     logger.info(f"[SEMANTIC REBUILD] Generating embeddings for user {user_id} from emails...")
     email_cursor = self.email_index_collection.find(filter_query)
     batch_docs = []
@@ -539,7 +520,6 @@ class MailService:
       client_secret=settings.GOOGLE_CLIENT_SECRET
     )
 
-    # Disable cache to avoid oauth2client<4.0.0 warning and crashes
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
   async def get_mailboxes(self, user_id: str):
@@ -559,7 +539,6 @@ class MailService:
     ]
 
   async def get_all_labels(self, user_id: str):
-    """Get all Gmail labels with full details."""
     service = await self.get_gmail_service(user_id)
     results = service.users().labels().list(userId='me').execute()
     labels = results.get('labels', [])
@@ -575,11 +554,9 @@ class MailService:
     ]
 
   async def create_label(self, user_id: str, label_name: str):
-    """Create a new Gmail label."""
     service = await self.get_gmail_service(user_id)
     label_id = await self._get_or_create_label_id(service, user_id, label_name)
     
-    # Fetch the created label details
     try:
       label = service.users().labels().get(userId='me', id=label_id).execute()
       return {
@@ -596,37 +573,24 @@ class MailService:
       }
 
   def _has_attachments(self, payload: dict) -> bool:
-    """
-    Check if a Gmail message payload has attachments.
-    Returns True if any part has a filename (indicating an attachment).
-    """
     def check_parts(parts):
       if not parts:
         return False
       for part in parts:
-        # If this part has a filename, it's an attachment
         if part.get('filename'):
           return True
-        # Recursively check nested parts
         if part.get('parts') and check_parts(part.get('parts')):
           return True
       return False
     
-    # Check if payload has parts
     if payload.get('parts'):
       return check_parts(payload.get('parts'))
     
-    # Single part message - check if it has a filename
     return bool(payload.get('filename'))
 
   async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
-    """
-    Lấy danh sách email từ Gmail dựa trên mailbox_id (nhãn).
-    Hàm này tự động phân giải tên nhãn (ví dụ: 'todo') sang Gmail Label ID thực tế (ví dụ: 'Label_234').
-    """
     service = await self.get_gmail_service(user_id)
     
-    # 1. Map các nhãn hệ thống của Gmail (Frontend dùng số nhiều/chữ thường -> Gmail dùng ID chuẩn)
     system_labels_map = {
         'inbox': 'INBOX',
         'sent': 'SENT',
@@ -637,28 +601,22 @@ class MailService:
         'important': 'IMPORTANT'
     }
 
-    # Lấy ID nếu là nhãn hệ thống
     gmail_label_id = system_labels_map.get(mailbox_id.lower())
 
-    # 2. Nếu không phải nhãn hệ thống, tìm ID trong danh sách nhãn của người dùng
     if not gmail_label_id:
         try:
-            # Lấy danh sách tất cả nhãn hiện có trên Gmail của user
             results = service.users().labels().list(userId='me').execute()
             labels = results.get('labels', [])
             
-            # Chuẩn hóa tên cần tìm: 'todo' -> 'to do' để khớp với Gmail nếu user đặt tên có dấu cách
             search_name = mailbox_id.lower()
             if search_name == 'todo':
                 search_name = 'to do'
             
-            # Tìm nhãn có tên khớp
             for label in labels:
                 if label['name'].lower() == search_name:
                     gmail_label_id = label['id']
                     break
             
-            # Nếu vẫn không tìm thấy (nhãn chưa được tạo trên Gmail), trả về danh sách rỗng
             if not gmail_label_id:
                 print(f"Label '{mailbox_id}' not found in Gmail account.")
                 return {
@@ -670,7 +628,6 @@ class MailService:
             print(f"Error resolving label ID: {e}")
             return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
 
-    # 3. Gọi Gmail API để lấy danh sách tin nhắn với Label ID chính xác
     try:
         results = service.users().messages().list(
           userId='me',
@@ -680,7 +637,6 @@ class MailService:
         ).execute()
     except Exception as e:
         print(f"Error fetching messages from Gmail: {e}")
-        # Trả về rỗng nếu lỗi API (ví dụ 404 Label not found dù đã cố tìm)
         return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
 
     messages = results.get('messages', [])
@@ -689,23 +645,20 @@ class MailService:
 
     thread_list = []
 
-    # 4. Lấy chi tiết từng tin nhắn
     for msg in messages:
       try:
           msg_data = service.users().messages().get(
             userId='me',
             id=msg['id'],
-            format='full' # Need full format to get payload parts for attachment detection
+            format='full'
           ).execute()
 
           payload = msg_data.get('payload', {})
           headers = payload.get('headers', [])
 
-          # Hàm helper lấy header an toàn
           def get_header(name):
             return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
 
-          # Parse người gửi
           from_header = get_header('From')
           if from_header:
               name, email_addr = email.utils.parseaddr(from_header)
@@ -713,7 +666,6 @@ class MailService:
           else:
               sender_obj = {"name": "Unknown", "email": ""}
 
-          # Parse người nhận (To)
           to_header = get_header('To')
           to_list = []
           if to_header:
@@ -732,10 +684,8 @@ class MailService:
               except Exception as e:
                   logger.warning(f"Summarize preview failed for {msg.get('id')}: {e}")
 
-          # Check if message has attachments
           has_attachments = self._has_attachments(payload)
 
-          # Mapping dữ liệu trả về cho Frontend
           thread_list.append({
             "id": msg['id'],
             "history_id": msg_data.get('historyId'),
@@ -744,14 +694,12 @@ class MailService:
             "to": to_list,
             "received_on": received_on,
             "unread": "UNREAD" in msg_data.get('labelIds', []),
-            # Trả về danh sách tags/labels để frontend hiển thị (nếu cần)
             "tags": [{"id": l, "name": l} for l in msg_data.get('labelIds', [])],
-            "body": preview_body, # Snippet là bản tóm tắt ngắn của body
+            "body": preview_body,
             "summary": summary_text,
             "has_attachments": has_attachments
           })
       except Exception as e:
-          # Log lỗi nhưng không làm chết cả danh sách nếu 1 email lỗi
           print(f"Error processing message {msg.get('id')}: {e}")
           continue
 
@@ -764,17 +712,12 @@ class MailService:
   async def get_email_detail(self, user_id: str, email_id: str, summarize: bool = False) -> ThreadDetailResponse:
     service = await self.get_gmail_service(user_id)
     
-    # First try to get the message to find the threadId
     try:
         msg_metadata = service.users().messages().get(userId='me', id=email_id, format='minimal').execute()
         thread_id = msg_metadata.get('threadId')
     except Exception:
-        # If it fails, maybe email_id is already a thread_id? 
-        # But standard flow is list -> click -> detail. list returns msg ids.
-        # Let's assume it's a message ID. If not found, raise.
         raise ValueError("Message not found")
 
-    # Fetch full thread with full message format to get attachment IDs
     thread_data = service.users().threads().get(userId='me', id=thread_id, format='full').execute()
     messages = thread_data.get('messages', [])
     
@@ -788,7 +731,6 @@ class MailService:
                 logger.warning(f"Summarize detail failed for {msg.get('id')}: {e}")
         parsed_messages.append(parsed)
     
-    # Sort by date
     parsed_messages.sort(key=lambda x: x['received_on'])
     
     latest = parsed_messages[-1] if parsed_messages else None
@@ -799,7 +741,7 @@ class MailService:
         "has_unread": any(m['unread'] for m in parsed_messages),
         "total_replies": len(parsed_messages) - 1 if parsed_messages else 0,
         "labels": latest['tags'] if latest else [],
-        "is_latest_draft": False # TODO: check if latest is draft
+        "is_latest_draft": False
     }
 
   def _parse_gmail_message(self, msg_data: dict) -> ParsedMessage:
@@ -812,7 +754,6 @@ class MailService:
       def get_header_list(name):
           val = get_header(name)
           if not val: return []
-          # Simple split, ideally use email.utils.getaddresses
           return [{"name": n, "email": e} for n, e in email.utils.getaddresses([val])]
 
       subject = get_header('Subject') or '(No Subject)'
@@ -862,7 +803,6 @@ class MailService:
       if 'parts' in payload:
           parse_parts(payload['parts'])
       else:
-          # Single part message
           data = payload.get('body', {}).get('data')
           mime_type = payload.get('mimeType')
           if data:
@@ -874,7 +814,6 @@ class MailService:
 
       processed_html = body_html or f"<pre>{body_text}</pre>"
       
-      # Log email HTML content for debugging
       try:
           _email_html_logger.info(f"\n{'='*80}\n")
           _email_html_logger.info(f"Email ID: {msg_data['id']}")
@@ -899,7 +838,7 @@ class MailService:
           "bcc": bcc_list,
           "received_on": received_on,
           "unread": "UNREAD" in label_ids,
-          "body": body_text or body_html, # Fallback
+          "body": body_text or body_html,
           "processed_html": processed_html,
           "decoded_body": body_text,
           "tags": tags,
@@ -929,11 +868,9 @@ class MailService:
               message['bcc'] = email_data.get('bcc')
               
           body = email_data.get('body', '')
-          # Simple detection, assume HTML if it looks like it, or just send as HTML
           msg = MIMEText(body, 'html')
           message.attach(msg)
           
-          # Handle attachments
           if attachments:
               for attachment in attachments:
                   try:
@@ -985,7 +922,6 @@ class MailService:
       service = await self.get_gmail_service(user_id)
       
       try:
-          # Get original message to find threadId and headers
           original_msg = service.users().messages().get(userId='me', id=email_id, format='metadata').execute()
           thread_id = original_msg.get('threadId')
           
@@ -1007,7 +943,7 @@ class MailService:
               
           message = MIMEMultipart()
           message['to'] = reply_data.get('to')
-          message['subject'] = reply_data.get('subject') # Should probably prepend Re: if not present
+          message['subject'] = reply_data.get('subject')
           message['In-Reply-To'] = message_id
           message['References'] = references
           
@@ -1015,7 +951,6 @@ class MailService:
           msg = MIMEText(body, 'html')
           message.attach(msg)
           
-          # Handle attachments
           if attachments:
               for attachment in attachments:
                   try:
@@ -1060,7 +995,6 @@ class MailService:
           raise ValueError(f"Failed to reply to email: {str(e)}")
 
   async def create_draft(self, user_id: str, draft_data: dict, attachments: list = None):
-      """Create a draft email in Gmail."""
       from googleapiclient.errors import HttpError
       
       if not draft_data.get('to'):
@@ -1081,7 +1015,6 @@ class MailService:
           msg = MIMEText(body, 'html')
           message.attach(msg)
           
-          # Handle attachments
           if attachments:
               for attachment in attachments:
                   try:
@@ -1124,7 +1057,6 @@ class MailService:
       except Exception as e:
           raise ValueError(f"Failed to create draft: {str(e)}")
 
-  # [CẬP NHẬT] Sửa lại hàm modify_email
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
       service = await self.get_gmail_service(user_id)
       
@@ -1133,7 +1065,6 @@ class MailService:
       add_label_ids = []
       remove_label_ids = []
 
-      # Xử lý unread
       if 'unread' in updates:
           if updates['unread']:
               add_label_ids.append('UNREAD')
@@ -1142,7 +1073,6 @@ class MailService:
               remove_label_ids.append('UNREAD')
               if 'UNREAD' in add_label_ids: add_label_ids.remove('UNREAD')
 
-      # Xử lý starred
       if 'starred' in updates:
           if updates['starred']:
               add_label_ids.append('STARRED')
@@ -1151,21 +1081,14 @@ class MailService:
               remove_label_ids.append('STARRED')
               if 'STARRED' in add_label_ids: add_label_ids.remove('STARRED')
 
-      # Xử lý trash
       if updates.get('trash'):
            add_label_ids.append('TRASH')
-           # Gmail tự động xóa các nhãn khác khi vào Trash, nhưng ta cứ thêm vào list xóa cho chắc
            if 'TRASH' in remove_label_ids: remove_label_ids.remove('TRASH')
 
-      # [LOGIC MỚI] Xử lý custom labels (Todo, Done...)
       if 'labels' in updates:
           labels_to_add = updates.get('labels', [])
           
-          # Khi di chuyển email giữa các cột Kanban, cần xóa TẤT CẢ các label Kanban khác
-          # để email chỉ xuất hiện ở 1 cột
-          
           for label_name in labels_to_add:
-              # Lấy ID thật của nhãn (ví dụ: "todo" -> "Label_123")
               real_label_id = await self._get_or_create_label_id(service, user_id, label_name)
               
               if real_label_id not in add_label_ids:
@@ -1209,11 +1132,8 @@ class MailService:
           
           except Exception as e:
               print(f"Warning: Could not remove old Kanban labels: {e}")
-              # Fallback to old behavior if error occurs
               pass
 
-      # Safety check: Ensure email has at least one label
-      # If we're removing all labels, keep the email in a safe place
       if remove_label_ids and not add_label_ids:
           print("[WARNING] No labels would be added! Keeping INBOX to prevent email from being 'lost'")
           remove_label_ids = [lid for lid in remove_label_ids if lid != 'INBOX']
@@ -1395,7 +1315,6 @@ class MailService:
       return result
 
   async def summarize_email(self, user_id: str, email_id: str) -> dict:
-      """Summarize a single email's latest message."""
       detail = await self.get_email_detail(user_id, email_id, summarize=False)
       latest = detail.get("latest") if isinstance(detail, dict) else detail.latest  # detail is dict-like
 
@@ -1414,21 +1333,15 @@ class MailService:
 
       return {"email_id": email_id, "summary": summary_text}
 
-# [THÊM MỚI] Hàm hỗ trợ tìm hoặc tạo Label ID từ tên
   async def _get_or_create_label_id(self, service, user_id: str, label_name: str) -> str:
-      # Map các tên cột Kanban sang tên hiển thị trên Gmail
       SYSTEM_LABELS = {'INBOX': 'INBOX', 'TRASH': 'TRASH', 'SPAM': 'SPAM', 'UNREAD': 'UNREAD', 'STARRED': 'STARRED', 'SNOOZED': 'SNOOZED'}
       label_upper = label_name.upper()
       
-      # Nếu là nhãn hệ thống, trả về ngay
       if label_upper in SYSTEM_LABELS:
           return SYSTEM_LABELS[label_upper]
 
-      # Sử dụng tên gốc mà user nhập (không convert thành Title Case)
-      # Nếu user muốn "todo" thì để "todo", không chuyển thành "Todo"
       display_name = label_name.strip()
       
-      # Chỉ xử lý đặc biệt cho một số tên phổ biến
       special_cases = {
           'todo': 'To Do',
           'done': 'Done',
@@ -1437,17 +1350,14 @@ class MailService:
           display_name = special_cases[label_name.lower()]
       
       try:
-          # 1. Lấy danh sách tất cả nhãn hiện có
           results = service.users().labels().list(userId='me').execute()
           labels = results.get('labels', [])
           
-          # 2. Tìm xem nhãn đã tồn tại chưa (so sánh không phân biệt hoa thường)
           for label in labels:
               if label['name'].lower() == display_name.lower():
                   print(f"Found existing label: {label['name']} (id: {label['id']})")
-                  return label['id'] # Trả về Label ID thật (vd: Label_34234)
+                  return label['id']
 
-          # 3. Nếu chưa có, tạo mới nhãn trên Gmail
           print(f"Creating new label: {display_name}")
           created_label = service.users().labels().create(
               userId='me', 
@@ -1464,20 +1374,17 @@ class MailService:
           print(f"Error getting/creating label {label_name}: {str(e)}")
           import traceback
           traceback.print_exc()
-          # Fallback: Trả về nguyên gốc nếu lỗi (có thể gây lỗi 400 nhưng tốt hơn là crash)
           return label_name
 
   async def snooze_email(self, user_id: str, email_id: str, snooze_until: datetime):
         service = await self.get_gmail_service(user_id)
 
-        # Normalize snooze time to UTC
         snooze_until_utc = (
             snooze_until.replace(tzinfo=timezone.utc)
             if snooze_until.tzinfo is None
             else snooze_until.astimezone(timezone.utc)
         )
 
-        # Fetch current labels to restore later
         try:
             msg_metadata = service.users().messages().get(
                 userId='me', id=email_id, format='minimal'
@@ -1486,10 +1393,8 @@ class MailService:
         except Exception as e:
             raise ValueError(f"Failed to read current labels before snooze: {e}")
 
-        # 1. Create SNOOZED label on Gmail if it does not exist
         snooze_label_id = await self._get_or_create_label_id(service, user_id, "SNOOZED")
 
-        # 2. Remove from INBOX, add to SNOOZED
         body = {
             'addLabelIds': [snooze_label_id],
             'removeLabelIds': ['INBOX']
@@ -1499,7 +1404,6 @@ class MailService:
         except Exception as e:
             raise ValueError(f"Gmail API Error: {e}")
 
-        # 3. Save to MongoDB for worker to monitor (track original labels)
         now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
         await self.snoozed_collection.update_one(
             {"email_id": email_id, "user_id": user_id},
@@ -1519,10 +1423,8 @@ class MailService:
 
         return {"message": f"Email snoozed until {snooze_until_utc.isoformat()}"}
 
-    # Function called by Scheduler
   async def check_and_restore_snoozed_emails(self):
         now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
-        # Find emails whose snooze has expired and are still active
         cursor = self.snoozed_collection.find({
             "snooze_until": {"$lte": now_utc},
             "status": "active"
@@ -1533,7 +1435,6 @@ class MailService:
             email_id = record["email_id"]
             original_labels = record.get("original_labels") or ["INBOX"]
 
-            # Remove SNOOZED from the labels we will add back
             labels_to_restore = [
                 label for label in original_labels if label != "SNOOZED"
             ]
@@ -1569,3 +1470,43 @@ class MailService:
                     }}
                 )
                 print(f"[SNOOZE WORKER] Error restoring email {email_id}: {e}")
+
+  async def process_embedding_queue(self):
+    try:
+      batch_size = settings.EMBEDDING_BATCH_SIZE
+      cursor = self.email_index_collection.find(
+        {"is_embedded": {"$ne": True}},
+        limit=batch_size
+      ).sort("received_on", -1)
+      
+      docs = await cursor.to_list(length=batch_size)
+      
+      if not docs:
+        return
+
+      logger.info(f"Processing embedding for {len(docs)} emails")
+      
+      # Group by user_id
+      docs_by_user = {}
+      for doc in docs:
+        uid = doc["user_id"]
+        if uid not in docs_by_user:
+          docs_by_user[uid] = []
+        docs_by_user[uid].append(doc)
+      
+      vector_store = get_vector_store()
+      for uid, user_docs in docs_by_user.items():
+        await self._upsert_embeddings_batch(uid, user_docs, vector_store)
+      
+      # Update is_embedded flag
+      message_ids = [d["message_id"] for d in docs]
+      await self.email_index_collection.update_many(
+        {"message_id": {"$in": message_ids}},
+        {"$set": {"is_embedded": True}}
+      )
+      
+      logger.info(f"Successfully embedded {len(docs)} emails")
+      
+    except Exception as e:
+      logger.error(f"Error in process_embedding_queue: {e}")
+      logger.error(f"Error in process_embedding_queue: {e}")
