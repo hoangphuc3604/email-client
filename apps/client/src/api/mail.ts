@@ -202,6 +202,26 @@ const mailApi = {
     })
     return res.data?.data || res.data
   },
+
+  async getKanbanColumns() {
+    const res = await api.get('/kanban/columns')
+    return res.data?.data || res.data
+  },
+
+  async createKanbanColumn(column: { name: string; gmail_label_id?: string; gmail_label_name?: string; order: number }) {
+    const res = await api.post('/kanban/columns', column)
+    return res.data?.data || res.data
+  },
+
+  async updateKanbanColumn(columnId: string, updates: { name?: string; gmail_label_id?: string; gmail_label_name?: string; order?: number }) {
+    const res = await api.put(`/kanban/columns/${columnId}`, updates)
+    return res.data?.data || res.data
+  },
+
+  async deleteKanbanColumn(columnId: string) {
+    const res = await api.delete(`/kanban/columns/${columnId}`)
+    return res.data?.data || res.data
+  },
 }
 
 export { mailApi }

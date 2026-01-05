@@ -358,7 +358,21 @@ class MailService:
     
     filter_query: Dict[str, Any] = {"user_id": user_id}
     if mailbox_id:
-      filter_query["labels"] = mailbox_id
+      # Check if this is a kanban label (stored in DB labels collection)
+      db_label = await self.labels_collection.find_one({
+        "user_id": user_id,
+        "name": mailbox_id
+      })
+
+      if db_label:
+        # This is a kanban label, query by DB label ID
+        filter_query["labels"] = {"$in": [db_label['label_id']]}
+      else:
+        # This is a Gmail system label, resolve Gmail label ID
+        service = await self.get_gmail_service(user_id)
+        gmail_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
+        if gmail_label_id:
+          filter_query["labels"] = {"$in": [gmail_label_id]}
       
     logger.info(f"[SEMANTIC REBUILD] Generating embeddings for user {user_id} from emails...")
     email_cursor = self.email_index_collection.find(filter_query)
@@ -546,9 +560,19 @@ class MailService:
   async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
     """Get emails from DB first, fallback to Gmail API if needed."""
     try:
-      # Resolve mailbox label ID for filtering
-      service = await self.get_gmail_service(user_id)
-      gmail_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
+      # Check if this is a kanban label (stored in DB labels collection)
+      db_label = await self.labels_collection.find_one({
+        "user_id": user_id,
+        "name": mailbox_id
+      })
+
+      if db_label:
+        # This is a kanban label, query by DB label ID
+        query_label_id = db_label['label_id']
+      else:
+        # This is a Gmail system label, resolve Gmail label ID
+        service = await self.get_gmail_service(user_id)
+        query_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
 
       # Parse pagination
       skip = 0
@@ -560,8 +584,8 @@ class MailService:
 
       # Query DB for emails
       query = {"user_id": user_id}
-      if gmail_label_id:
-        query["labels"] = gmail_label_id
+      if query_label_id:
+        query["labels"] = {"$in": [query_label_id]}
 
       cursor = self.emails_collection.find(query).sort("received_on", -1).skip(skip).limit(limit)
       email_docs = await cursor.to_list(length=limit)
@@ -1207,6 +1231,17 @@ class MailService:
       if 'labels' in updates:
           labels_to_add = updates.get('labels', [])
 
+          # Remove existing kanban labels before adding new ones
+          # Get all user labels (kanban labels) for this user
+          user_labels = await self.labels_collection.find({"user_id": user_id}).to_list(length=None)
+          kanban_label_ids = [label['label_id'] for label in user_labels]
+
+          # Remove all existing kanban labels
+          new_labels = [label for label in new_labels if label not in kanban_label_ids]
+
+          # Also remove kanban label tags
+          new_tags = [tag for tag in new_tags if tag['id'] not in kanban_label_ids]
+
           # Get or create DB labels for the new labels
           for label_name in labels_to_add:
               label_id = await self._get_or_create_db_label_id(user_id, label_name)
@@ -1217,10 +1252,7 @@ class MailService:
               if not any(tag['id'] == label_id for tag in new_tags):
                   new_tags.append({'id': label_id, 'name': label_name})
 
-          # Remove INBOX when moving to kanban column (todo, done, etc.)
-          # In kanban mode, email should not remain in INBOX when assigned to a kanban column
-          if 'INBOX' in new_labels and labels_to_add:
-              new_labels.remove('INBOX')
+          # Keep INBOX when moving to kanban column - email can be in both INBOX and kanban column
 
       # Update the document in DB
       if new_labels != email_doc.get('labels', []):
