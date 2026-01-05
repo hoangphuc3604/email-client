@@ -205,6 +205,11 @@ async def on_startup():
     asyncio.create_task(sync_service.run_sync_loop())
     logging.info(f"[STARTUP] In-process sync loop started (interval: {settings.MAIL_SYNC_INTERVAL_SECONDS}s)")
 
+    # Run backlog processing loop in background (if enabled)
+    if settings.MAIL_SYNC_BACKLOG_ENABLED:
+        asyncio.create_task(sync_service.run_backlog_loop())
+        logging.info(f"[STARTUP] Backlog processing loop started (interval: {settings.MAIL_SYNC_BACKLOG_INTERVAL_SECONDS}s)")
+
     # Legacy scheduler jobs
     scheduler.add_job(run_snooze_job, "interval", minutes=1)
     scheduler.add_job(

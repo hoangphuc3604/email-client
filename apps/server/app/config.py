@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     MAIL_SYNC_STARTUP_FULL: bool = True
     MAIL_SYNC_CONCURRENCY_LIMIT: int = 1
     MAIL_SYNC_MAX_EMAILS_PER_BATCH: int = 1000  # Maximum emails to sync per batch
+    # Backlog sync settings
+    MAIL_SYNC_BACKLOG_ENABLED: bool = True
+    MAIL_SYNC_BACKLOG_PAGE_SIZE: int = 20  # Page size for backlog processing
+    MAIL_SYNC_BACKLOG_INTERVAL_SECONDS: int = 60  # How often to run backlog processing (1 minute)
+    MAIL_SYNC_BACKLOG_MAX_PAGES_PER_RUN: int = 2  # Max pages to process per backlog run
     QDRANT_URL: str = ""
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION: str = "emails"

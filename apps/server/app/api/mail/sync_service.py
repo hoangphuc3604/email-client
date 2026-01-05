@@ -434,6 +434,33 @@ class EmailSyncService:
         # Remove timestamp fields from doc to avoid conflicts
         doc_for_set = {k: v for k, v in doc_dict.items() if k not in ['created_at', 'updated_at']}
 
+        # Preserve kanban labels (user labels) when syncing from Gmail
+        existing_doc = await self.emails_collection.find_one(
+            {"user_id": email_doc.user_id, "message_id": email_doc.message_id}
+        )
+
+        if existing_doc:
+            # Get all user labels (kanban labels) from DB
+            user_labels = await self.labels_collection.find(
+                {"user_id": email_doc.user_id}
+            ).to_list(length=None)
+            user_label_ids = [label['label_id'] for label in user_labels]
+
+            # Preserve existing kanban labels that are not in Gmail data
+            existing_labels = existing_doc.get('labels', [])
+            gmail_labels = doc_for_set.get('labels', [])
+
+            # Keep kanban labels that exist in DB but not in Gmail sync
+            preserved_labels = []
+            for label_id in existing_labels:
+                if label_id in user_label_ids and label_id not in gmail_labels:
+                    preserved_labels.append(label_id)
+
+            # Merge Gmail labels with preserved kanban labels
+            if preserved_labels:
+                doc_for_set['labels'] = gmail_labels + preserved_labels
+                logger.debug(f"[SYNC] Preserved kanban labels for {email_doc.message_id}: {preserved_labels}")
+
         await self.emails_collection.update_one(
             {"user_id": email_doc.user_id, "message_id": email_doc.message_id},
             {
@@ -500,10 +527,13 @@ class EmailSyncService:
                 break
         return latest_history_id
 
-    async def _smart_sync_recent_first(self, service, user_id: str, mailbox_label_id: Optional[str], max_emails: int = 1000) -> Optional[str]:
+    async def _smart_sync_recent_first(self, service, user_id: str, mailbox_label_id: Optional[str], max_emails: int = 1000) -> Dict[str, Any]:
         """
         Sync emails prioritizing newest first, with a maximum limit.
         This is more efficient than full_resync for initial loads and ongoing syncs.
+
+        Returns:
+            Dict with 'history_id' and optional 'backlog_cursor' for remaining pages
         """
         latest_history_id = None
         synced_count = 0
@@ -512,7 +542,7 @@ class EmailSyncService:
         # First, try to get recent emails (no date filter for most recent)
         page_token = None
         pages = 0
-        max_pages = min(50, (max_emails // 100) + 1)  # Reasonable page limit
+        max_pages = min(50, max(5, (max_emails // 100) + 1))  # Ensure at least 5 pages to detect backlog
 
         logger.info(f"[SMART SYNC] Starting sync for user {user_id}, max_emails={max_emails}, mailbox={mailbox_label_id}")
 
@@ -627,7 +657,17 @@ class EmailSyncService:
                 break
 
         logger.info(f"[SMART SYNC] Completed sync for user {user_id}: {synced_count} emails synced, {error_count} errors")
-        return latest_history_id
+
+        result = {"history_id": latest_history_id}
+
+        # Check if there are remaining pages for backlog processing
+        if page_token:
+            # There are more pages available beyond our processing limit
+            result["backlog_cursor"] = page_token
+            result["backlog_mode"] = "pages"
+            logger.info(f"[SMART SYNC] Backlog cursor saved: {page_token[:50]}... (remaining pages to process)")
+
+        return result
 
     async def _full_resync(self, service, user_id: str, mailbox_label_id: Optional[str], lookback_days: int = 90, max_pages: int = 5) -> Optional[str]:
         """Legacy full resync - kept for backward compatibility."""
@@ -636,6 +676,8 @@ class EmailSyncService:
         page_token = None
         pages = 0
         latest_history_id = None
+        synced_count = 0
+        error_count = 0
         while pages < max_pages:
             try:
                 results = service.users().messages().list(
@@ -661,13 +703,17 @@ class EmailSyncService:
                     # Also store full email document
                     full_doc = self._parse_message_for_storage(msg_data, user_id)
                     await self._upsert_email_doc(full_doc)
+                    synced_count += 1
                 except Exception:
+                    error_count += 1
                     continue
             page_token = results.get('nextPageToken')
             pages += 1
             if not page_token:
                 break
-        return latest_history_id
+
+        logger.info(f"[SMART SYNC] Completed sync for user {user_id}: {synced_count} emails synced, {error_count} errors")
+        return {"history_id": latest_history_id}
 
     async def sync_email_index(self, user_id: str, mailbox_id: Optional[str] = None, max_emails: Optional[int] = None) -> Dict[str, Any]:
         """Smart sync that prioritizes recent emails and supports incremental updates."""
@@ -707,14 +753,23 @@ class EmailSyncService:
                 logger.warning(f"[SYNC] Incremental sync failed: {e}")
                 latest_history_id = None
 
-        # If no incremental sync or it failed, do smart recent-first sync
-        if not latest_history_id:
-            logger.info(f"[SYNC] Performing smart sync with max_emails={max_emails}")
-            try:
-                latest_history_id = await self._smart_sync_recent_first(service, user_id, mailbox_label_id, max_emails)
-            except Exception as e:
-                logger.error(f"[SYNC] Smart sync failed for user {user_id}: {e}")
-                return {"synced": False, "error": "Sync process failed"}
+        # Always run smart sync to detect backlog (emails missed due to batch limits)
+        logger.info(f"[SYNC] Performing smart sync to detect backlog with max_emails={max_emails}")
+        try:
+            smart_sync_result = await self._smart_sync_recent_first(service, user_id, mailbox_label_id, max_emails)
+
+            # Update history_id if smart sync found a newer one
+            if smart_sync_result.get("history_id") and (not latest_history_id or smart_sync_result["history_id"] > latest_history_id):
+                latest_history_id = smart_sync_result["history_id"]
+
+            # Check if backlog processing is needed
+            backlog_cursor = smart_sync_result.get("backlog_cursor")
+            if backlog_cursor:
+                logger.info(f"[SYNC] Backlog cursor detected, will process remaining pages in background")
+
+        except Exception as e:
+            logger.error(f"[SYNC] Smart sync failed for user {user_id}: {e}")
+            return {"synced": False, "error": "Sync process failed"}
 
         # Update sync state
         result = {"synced": False, "email_count": 0}
@@ -729,6 +784,13 @@ class EmailSyncService:
             # Only update history_id if we got a new one from incremental sync
             if latest_history_id:
                 update_data["history_id"] = latest_history_id
+
+            # Save backlog cursor if available (from smart sync)
+            if 'backlog_cursor' in locals() and backlog_cursor:
+                update_data["backlog_cursor"] = backlog_cursor
+                update_data["backlog_mode"] = "pages"
+                update_data["backlog_last_processed_at"] = now
+                logger.debug(f"[SYNC] Saved backlog cursor for background processing: {backlog_cursor[:50]}...")
 
             # Mark full sync as completed if we've synced a reasonable amount
             current_email_count = await self.emails_collection.count_documents({"user_id": user_id})
@@ -787,6 +849,196 @@ class EmailSyncService:
                 logger.warning(f"[SYNC ALL] Exception syncing user {user_id}: {e}")
 
         logger.info(f"[SYNC ALL] Completed sync for {user_count} users: {success_count} successful, {error_count} failed")
+
+    async def _process_backlog(self, user_id: str, max_pages: int = None) -> Dict[str, Any]:
+        """Process backlog of older emails that weren't synced due to batch limits.
+
+        Args:
+            user_id: User ID to process backlog for
+            max_pages: Maximum pages to process in this run (defaults to config)
+
+        Returns:
+            Dict with processing results
+        """
+        if max_pages is None:
+            max_pages = settings.MAIL_SYNC_BACKLOG_MAX_PAGES_PER_RUN
+
+        logger.info(f"[BACKLOG] Starting backlog processing for user {user_id}, max_pages={max_pages}")
+
+        try:
+            service = await self.get_gmail_service(user_id)
+        except Exception as e:
+            logger.error(f"[BACKLOG] Failed to get Gmail service for user {user_id}: {e}")
+            return {"processed": False, "error": "Failed to authenticate with Gmail"}
+
+        # Get current sync state
+        sync_state = await self.sync_state_collection.find_one({"user_id": user_id})
+
+        if not sync_state or not sync_state.get("backlog_cursor"):
+            logger.info(f"[BACKLOG] No backlog cursor found for user {user_id}, nothing to process")
+            return {"processed": True, "message": "No backlog to process"}
+
+        backlog_cursor = sync_state["backlog_cursor"]
+        backlog_mode = sync_state.get("backlog_mode", "pages")
+
+        logger.debug(f"[BACKLOG] Processing backlog with cursor: {backlog_cursor[:50]}..., mode: {backlog_mode}")
+
+        processed_count = 0
+        error_count = 0
+        pages_processed = 0
+        next_cursor = None
+
+        try:
+            # Process pages from backlog cursor
+            page_token = backlog_cursor
+            while pages_processed < max_pages and page_token:
+                logger.debug(f"[BACKLOG] Processing page {pages_processed + 1}/{max_pages} with token: {page_token[:50]}...")
+
+                try:
+                    # List messages using the backlog cursor
+                    results = service.users().messages().list(
+                        userId='me',
+                        pageToken=page_token,
+                        maxResults=settings.MAIL_SYNC_BACKLOG_PAGE_SIZE
+                    ).execute()
+                except Exception as e:
+                    logger.error(f"[BACKLOG] Error listing messages with page token {page_token[:50]}...: {e}")
+                    error_count += 1
+                    break
+
+                messages = results.get('messages', [])
+                next_page_token = results.get('nextPageToken')
+
+                if not messages:
+                    logger.info(f"[BACKLOG] No more messages in backlog for user {user_id}")
+                    break
+
+                # Extract message IDs and check which ones already exist
+                page_message_ids = [msg.get('id') for msg in messages if msg.get('id')]
+                if page_message_ids:
+                    existing_message_ids = await self._check_existing_message_ids(user_id, page_message_ids)
+                    messages_to_sync = [msg for msg in messages if msg.get('id') not in existing_message_ids]
+
+                    logger.debug(f"[BACKLOG] Page has {len(messages)} messages, {len(existing_message_ids)} exist, {len(messages_to_sync)} to sync")
+
+                    # Process messages that don't exist in DB
+                    for msg in messages_to_sync:
+                        msg_id = msg.get('id')
+                        try:
+                            msg_data = service.users().messages().get(
+                                userId='me',
+                                id=msg_id,
+                                format='full'
+                            ).execute()
+
+                            # Store in search index first
+                            doc = self._parse_message_for_index(msg_data, user_id)
+                            await self._upsert_index_doc(doc)
+
+                            # Store full document
+                            full_doc = self._parse_message_for_storage(msg_data, user_id)
+                            await self._upsert_email_doc(full_doc)
+
+                            processed_count += 1
+                            logger.debug(f"[BACKLOG] Processed message {msg_id} ({processed_count} total)")
+
+                        except Exception as e:
+                            error_count += 1
+                            logger.warning(f"[BACKLOG] Error processing message {msg_id}: {e}")
+
+                # Update cursor for next page
+                page_token = next_page_token
+                pages_processed += 1
+
+                # Check if we've reached the limit for this run
+                if processed_count >= settings.MAIL_SYNC_MAX_EMAILS_PER_BATCH:
+                    logger.info(f"[BACKLOG] Reached max emails per batch limit ({settings.MAIL_SYNC_MAX_EMAILS_PER_BATCH})")
+                    next_cursor = page_token
+                    break
+
+            # Update sync state
+            now = datetime.utcnow().isoformat()
+            update_data = {
+                "backlog_last_processed_at": now
+            }
+
+            if next_cursor:
+                # Still have more to process
+                update_data["backlog_cursor"] = next_cursor
+                logger.info(f"[BACKLOG] Backlog processing paused, cursor saved: {next_cursor[:50]}...")
+            else:
+                # Backlog processing completed
+                update_data["backlog_cursor"] = None
+                update_data["backlog_mode"] = None
+                logger.info(f"[BACKLOG] Backlog processing completed for user {user_id}")
+
+            await self.sync_state_collection.update_one(
+                {"user_id": user_id},
+                {"$set": update_data}
+            )
+
+            logger.info(f"[BACKLOG] Completed backlog processing for user {user_id}: {processed_count} emails processed, {error_count} errors, {pages_processed} pages")
+
+            return {
+                "processed": True,
+                "emails_processed": processed_count,
+                "errors": error_count,
+                "pages_processed": pages_processed,
+                "backlog_remaining": next_cursor is not None
+            }
+
+        except Exception as e:
+            logger.error(f"[BACKLOG] Error during backlog processing for user {user_id}: {e}")
+            return {"processed": False, "error": str(e)}
+
+    async def run_backlog_loop(self):
+        """Run the periodic backlog processing loop for all users."""
+        import asyncio
+
+        logger.info(f"[BACKLOG LOOP] Starting backlog processing loop with interval {settings.MAIL_SYNC_BACKLOG_INTERVAL_SECONDS} seconds")
+
+        backlog_count = 0
+        while True:
+            backlog_count += 1
+            start_time = datetime.utcnow()
+
+            try:
+                logger.debug(f"[BACKLOG LOOP] Starting backlog run #{backlog_count}")
+
+                # Get all users with backlog cursors
+                users_with_backlog = await self.sync_state_collection.find(
+                    {"backlog_cursor": {"$ne": None}},
+                    {"user_id": 1}
+                ).to_list(length=None)
+
+                processed_users = 0
+                total_emails_processed = 0
+
+                for user_doc in users_with_backlog:
+                    user_id = user_doc["user_id"]
+                    try:
+                        result = await self._process_backlog(user_id)
+                        if result.get("processed", False):
+                            processed_users += 1
+                            total_emails_processed += result.get("emails_processed", 0)
+                    except Exception as e:
+                        logger.warning(f"[BACKLOG LOOP] Error processing backlog for user {user_id}: {e}")
+
+                if processed_users > 0:
+                    logger.info(f"[BACKLOG LOOP] Run #{backlog_count} processed {processed_users} users, {total_emails_processed} emails")
+                else:
+                    logger.debug(f"[BACKLOG LOOP] Run #{backlog_count} found no users with backlog to process")
+
+                duration = (datetime.utcnow() - start_time).total_seconds()
+                logger.debug(f"[BACKLOG LOOP] Backlog run #{backlog_count} completed in {duration:.2f} seconds")
+
+            except Exception as e:
+                duration = (datetime.utcnow() - start_time).total_seconds()
+                logger.error(f"[BACKLOG LOOP] Error in backlog run #{backlog_count} after {duration:.2f} seconds: {e}")
+
+            # Sleep for configured interval
+            logger.debug(f"[BACKLOG LOOP] Sleeping for {settings.MAIL_SYNC_BACKLOG_INTERVAL_SECONDS} seconds until next backlog run")
+            await asyncio.sleep(settings.MAIL_SYNC_BACKLOG_INTERVAL_SECONDS)
 
     async def run_sync_loop(self):
         """Run the periodic email sync loop for all users."""
