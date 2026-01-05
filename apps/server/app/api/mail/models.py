@@ -158,6 +158,97 @@ class ReplyEmailRequest(CamelModel):
     subject: str
     body: str
 
-# Thêm vào cuối file hoặc chỗ phù hợp
+# DB Document Models for storing full email content
+class EmailDocument(CamelModel):
+    """
+    Complete email document stored in MongoDB.
+    Contains all fields needed for full email functionality.
+    """
+    # Core identifiers
+    user_id: str
+    message_id: str
+    thread_id: str
+    history_id: Optional[str] = None
+
+    # Email content
+    subject: str
+    from_name: Optional[str] = None
+    from_email: str
+    to: List[Sender]
+    cc: Optional[List[Sender]] = None
+    bcc: Optional[List[Sender]] = None
+
+    # Timestamps
+    received_on: str  # ISO timestamp
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    # Content
+    body: str  # Plain text body
+    processed_html: str  # Processed HTML content
+    decoded_body: Optional[str] = None
+    snippet: Optional[str] = None
+
+    # Metadata
+    labels: List[str]  # Gmail label IDs
+    tags: List[Label] = []  # User-friendly tags
+    unread: bool = False
+    has_attachments: bool = False
+    attachments: Optional[List[Attachment]] = None
+
+    # Email threading headers
+    message_id_header: Optional[str] = None
+    references: Optional[str] = None
+    in_reply_to: Optional[str] = None
+
+    # Search and AI features
+    is_embedded: bool = False
+    summary: Optional[str] = None
+
+
+class MailSyncState(CamelModel):
+    """Document tracking sync state for each user."""
+    user_id: str
+    history_id: Optional[str] = None
+    last_synced_at: Optional[str] = None
+    sync_version: Optional[str] = None
+    full_sync_completed: bool = False
+
+
+class UserLabel(CamelModel):
+    """User-managed labels stored in DB."""
+    user_id: str
+    label_id: str
+    name: str
+    type: str = "user"  # system or user
+    color: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class KanbanColumn(CamelModel):
+    """Kanban column configuration."""
+    user_id: str
+    column_id: str
+    name: str
+    label_id: Optional[str] = None  # Associated Gmail label
+    order: int
+    created_at: str
+    updated_at: str
+
+
+class SnoozeSchedule(CamelModel):
+    """Snoozed email schedule."""
+    user_id: str
+    email_id: str
+    snooze_until: str  # ISO timestamp
+    status: str = "active"  # active, processed, error
+    original_labels: List[str] = []
+    created_at: str
+    updated_at: str
+    restored_at: Optional[str] = None
+    last_error: Optional[str] = None
+
+
 class SnoozeEmailRequest(CamelModel):
     snooze_until: datetime

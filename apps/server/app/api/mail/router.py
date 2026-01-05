@@ -4,6 +4,7 @@ from urllib.parse import quote
 import logging
 from app.api.auth.dependencies import get_current_user
 from app.api.auth.models import UserInfo
+from app.config import settings
 from app.api.mail.service import MailService
 from app.api.mail.dependencies import get_mail_service
 from app.api.mail.models import SnoozeEmailRequest, SemanticSearchRequest
@@ -388,28 +389,27 @@ async def snooze_email_endpoint(
 @router.post("/sync", response_model=APIResponse[dict])
 async def sync_email_index(
     mailbox_id: Optional[str] = Query(None, description="Optional mailbox to sync"),
-    lookback_days: int = Query(90, ge=1, le=365, description="Days to look back"),
-    max_pages: int = Query(5, ge=1, le=20, description="Max pages to sync"),
+    max_emails: Optional[int] = Query(None, ge=1, le=10000, description="Max emails to sync (default from config)"),
     mail_service: MailService = Depends(get_mail_service),
     current_user: UserInfo = Depends(get_current_user)
 ):
     """
-    Sync emails from Gmail to MongoDB email index for search.
-    This populates the email_index collection with email metadata.
+    Smart sync emails prioritizing newest first.
+    Syncs incremental updates and fills gaps with recent emails.
     """
     try:
         await mail_service.sync_email_index(
             current_user.id,
             mailbox_id,
-            lookback_days,
-            max_pages
+            max_emails
         )
+        email_count = await mail_service.emails_collection.count_documents({"user_id": current_user.id})
         return APIResponse(
-            data={"synced": True},
-            message=f"Email index synced successfully for the last {lookback_days} days"
+            data={"synced": True, "email_count": email_count},
+            message=f"Smart email sync completed successfully"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to sync email index: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync emails: {str(e)}")
 
 
 @router.get("/labels", response_model=APIResponse[List[dict]])
@@ -437,3 +437,132 @@ async def create_gmail_label(
         return APIResponse(data=label, message="Label created successfully")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Admin endpoints for sync management
+@router.post("/admin/sync/trigger", response_model=APIResponse[dict])
+async def trigger_sync(
+    mailbox_id: Optional[str] = Query(None, description="Optional mailbox to sync"),
+    max_emails: Optional[int] = Query(None, ge=1, le=10000, description="Max emails to sync"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Manually trigger smart email sync for the current user."""
+    try:
+        await mail_service.sync_email_index(
+            current_user.id,
+            mailbox_id,
+            max_emails
+        )
+        email_count = await mail_service.emails_collection.count_documents({"user_id": current_user.id})
+        return APIResponse(
+            data={"triggered": True, "email_count": email_count},
+            message=f"Smart sync triggered for user {current_user.id}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger sync: {str(e)}")
+
+
+@router.get("/admin/sync/status", response_model=APIResponse[dict])
+async def get_sync_status(
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Get sync status for the current user."""
+    try:
+        # Get sync state from DB
+        sync_state = await mail_service.sync_state_collection.find_one({"user_id": current_user.id})
+
+        if not sync_state:
+            return APIResponse(
+                data={
+                    "user_id": current_user.id,
+                    "full_sync_completed": False,
+                    "last_synced_at": None,
+                    "sync_version": None,
+                    "history_id": None
+                },
+                message="No sync state found"
+            )
+
+        # Count emails in DB
+        email_count = await mail_service.emails_collection.count_documents({"user_id": current_user.id})
+
+        return APIResponse(
+            data={
+                "user_id": current_user.id,
+                "full_sync_completed": sync_state.get("full_sync_completed", False),
+                "last_synced_at": sync_state.get("last_synced_at"),
+                "sync_version": sync_state.get("sync_version"),
+                "history_id": sync_state.get("history_id"),
+                "email_count": email_count
+            },
+            message="Sync status retrieved"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get sync status: {str(e)}")
+
+
+@router.post("/admin/sync/startup", response_model=APIResponse[dict])
+async def trigger_startup_sync(
+    max_emails: Optional[int] = Query(None, ge=1, le=10000, description="Max emails to sync"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Trigger a smart startup sync prioritizing recent emails."""
+    try:
+        await mail_service.sync_email_index(
+            current_user.id,
+            max_emails=max_emails
+        )
+        email_count = await mail_service.emails_collection.count_documents({"user_id": current_user.id})
+        return APIResponse(
+            data={"startup_sync_triggered": True, "email_count": email_count},
+            message=f"Smart startup sync triggered for user {current_user.id}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger startup sync: {str(e)}")
+
+
+@router.get("/admin/stats", response_model=APIResponse[dict])
+async def get_admin_stats(
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Get admin statistics for the current user."""
+    try:
+        # Email counts by label
+        pipeline = [
+            {"$match": {"user_id": current_user.id}},
+            {"$unwind": "$labels"},
+            {"$group": {"_id": "$labels", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}}
+        ]
+        label_stats = await mail_service.emails_collection.aggregate(pipeline).to_list(length=None)
+
+        # Total emails
+        total_emails = await mail_service.emails_collection.count_documents({"user_id": current_user.id})
+
+        # Unread count
+        unread_count = await mail_service.emails_collection.count_documents({
+            "user_id": current_user.id,
+            "unread": True
+        })
+
+        # Sync state
+        sync_state = await mail_service.sync_state_collection.find_one({"user_id": current_user.id})
+
+        return APIResponse(
+            data={
+                "total_emails": total_emails,
+                "unread_count": unread_count,
+                "label_breakdown": label_stats,
+                "sync_state": {
+                    "full_sync_completed": sync_state.get("full_sync_completed", False) if sync_state else False,
+                    "last_synced_at": sync_state.get("last_synced_at") if sync_state else None
+                }
+            },
+            message="Admin stats retrieved"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get admin stats: {str(e)}")
