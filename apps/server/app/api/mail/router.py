@@ -566,3 +566,138 @@ async def get_admin_stats(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get admin stats: {str(e)}")
+
+
+@router.post("/admin/backlog/process", response_model=APIResponse[dict])
+async def process_backlog(
+    user_id: str = Query(..., description="User ID to process backlog for"),
+    max_pages: Optional[int] = Query(None, ge=1, le=10, description="Max pages to process (default from config)"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Manually trigger backlog processing for a specific user.
+    This will process older emails that were skipped due to batch limits.
+    """
+    try:
+        # Get sync service from mail service
+        sync_service = mail_service.sync_service if hasattr(mail_service, 'sync_service') else None
+        if not sync_service:
+            # Create sync service if not available
+            from app.api.mail.sync_service import EmailSyncService
+            sync_service = EmailSyncService(mail_service.db)
+
+        result = await sync_service._process_backlog(user_id, max_pages)
+        return APIResponse(
+            data=result,
+            message=f"Backlog processing completed for user {user_id}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process backlog: {str(e)}")
+
+
+@router.get("/admin/backlog/status", response_model=APIResponse[dict])
+async def get_backlog_status(
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Get backlog processing status for all users.
+    Shows which users have pending backlog and their progress.
+    """
+    try:
+        # Get sync service
+        sync_service = mail_service.sync_service if hasattr(mail_service, 'sync_service') else None
+        if not sync_service:
+            from app.api.mail.sync_service import EmailSyncService
+            sync_service = EmailSyncService(mail_service.db)
+
+        # Get all users with backlog
+        backlog_users = await sync_service.sync_state_collection.find(
+            {"backlog_cursor": {"$ne": None}},
+            {
+                "user_id": 1,
+                "backlog_cursor": 1,
+                "backlog_mode": 1,
+                "backlog_last_processed_at": 1,
+                "updated_at": 1
+            }
+        ).to_list(length=None)
+
+        # Count total users and emails
+        total_users = await sync_service.sync_state_collection.count_documents({})
+        total_emails = await sync_service.emails_collection.count_documents({})
+
+        backlog_summary = []
+        for user in backlog_users:
+            # Count emails for this user
+            user_emails = await sync_service.emails_collection.count_documents({"user_id": user["user_id"]})
+
+            backlog_summary.append({
+                "user_id": user["user_id"],
+                "backlog_cursor": user.get("backlog_cursor")[:50] + "..." if user.get("backlog_cursor") else None,
+                "backlog_mode": user.get("backlog_mode"),
+                "backlog_last_processed_at": user.get("backlog_last_processed_at"),
+                "last_updated": user.get("updated_at"),
+                "email_count": user_emails
+            })
+
+        return APIResponse(
+            data={
+                "total_users": total_users,
+                "users_with_backlog": len(backlog_summary),
+                "total_emails": total_emails,
+                "backlog_users": backlog_summary
+            },
+            message="Backlog status retrieved"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get backlog status: {str(e)}")
+
+
+@router.post("/admin/sync/full_resync", response_model=APIResponse[dict])
+async def trigger_full_resync(
+    user_id: str = Query(..., description="User ID to perform full resync for"),
+    max_emails: Optional[int] = Query(10000, ge=1, le=50000, description="Max emails to sync"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Trigger a full resync for a user, clearing sync state and re-syncing from scratch.
+    This is useful when DB is missing many emails or sync state is corrupted.
+    """
+    try:
+        # Get sync service
+        sync_service = mail_service.sync_service if hasattr(mail_service, 'sync_service') else None
+        if not sync_service:
+            from app.api.mail.sync_service import EmailSyncService
+            sync_service = EmailSyncService(mail_service.db)
+
+        # Clear sync state to force full resync
+        await sync_service.sync_state_collection.update_one(
+            {"user_id": user_id},
+            {"$unset": {
+                "history_id": 1,
+                "full_sync_completed": 1,
+                "backlog_cursor": 1,
+                "backlog_mode": 1,
+                "backlog_last_processed_at": 1
+            }},
+            upsert=True
+        )
+
+        logger.info(f"[FULL RESYNC] Cleared sync state for user {user_id}, starting full resync")
+
+        # Trigger sync with high limit
+        result = await sync_service.sync_email_index(user_id, max_emails=max_emails)
+
+        return APIResponse(
+            data={
+                "user_id": user_id,
+                "sync_result": result,
+                "message": "Full resync triggered - sync state cleared and fresh sync initiated"
+            },
+            message=f"Full resync initiated for user {user_id}"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger full resync: {str(e)}")

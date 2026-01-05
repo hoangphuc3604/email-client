@@ -1199,6 +1199,9 @@ class MailService:
       if updates.get('trash'):
           if 'TRASH' not in new_labels:
               new_labels.append('TRASH')
+          # Remove INBOX when moving to trash
+          if 'INBOX' in new_labels:
+              new_labels.remove('INBOX')
 
       # Handle label changes (kanban column management)
       if 'labels' in updates:
@@ -1214,33 +1217,10 @@ class MailService:
               if not any(tag['id'] == label_id for tag in new_tags):
                   new_tags.append({'id': label_id, 'name': label_name})
 
-          # Remove old kanban labels (similar to original logic but DB-only)
-          # Keep system labels: SENT, DRAFT, TRASH, SPAM, IMPORTANT, UNREAD
-          system_labels_to_keep = ['SENT', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD']
-
-          # Get all user labels to determine which ones to remove
-          user_labels = await self.labels_collection.find({"user_id": user_id}).to_list(length=None)
-          user_label_ids = [label['label_id'] for label in user_labels]
-
-          labels_to_remove = []
-          for label_id in new_labels[:]:  # Copy to avoid modifying while iterating
-              if label_id in system_labels_to_keep:
-                  continue
-              if label_id.startswith('CATEGORY_'):
-                  continue
-              # Remove kanban-related labels: INBOX, STARRED, SNOOZED, and all user labels
-              if label_id in ['INBOX', 'STARRED', 'SNOOZED'] or label_id in user_label_ids:
-                  if label_id not in new_labels:  # Don't remove if it's being added
-                      labels_to_remove.append(label_id)
-
-          # Remove old labels
-          for label_id in labels_to_remove:
-              if label_id in new_labels:
-                  new_labels.remove(label_id)
-
-          # Ensure at least INBOX if no labels would remain
-          if not new_labels:
-              new_labels.append('INBOX')
+          # Remove INBOX when moving to kanban column (todo, done, etc.)
+          # In kanban mode, email should not remain in INBOX when assigned to a kanban column
+          if 'INBOX' in new_labels and labels_to_add:
+              new_labels.remove('INBOX')
 
       # Update the document in DB
       if new_labels != email_doc.get('labels', []):
@@ -1256,7 +1236,60 @@ class MailService:
           )
           logger.info(f"[MODIFY EMAIL] Updated email {email_id} in DB: {db_updates}")
 
+          # Sync changes with Gmail API
+          await self._sync_email_modifications_with_gmail(user_id, email_id, updates, new_labels)
+
       return await self.get_email_detail(user_id, email_id)
+
+  async def _sync_email_modifications_with_gmail(self, user_id: str, email_id: str, updates: dict, new_labels: list):
+      """Sync email modifications with Gmail API."""
+      try:
+          service = await self.get_gmail_service(user_id)
+
+          # Prepare Gmail API modify request
+          modify_request = {}
+
+          # Handle unread status
+          if 'unread' in updates:
+              if updates['unread']:
+                  modify_request['addLabelIds'] = modify_request.get('addLabelIds', []) + ['UNREAD']
+                  modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['UNREAD']
+              else:
+                  modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['UNREAD']
+
+          # Handle starred status
+          if 'starred' in updates:
+              if updates['starred']:
+                  modify_request['addLabelIds'] = modify_request.get('addLabelIds', []) + ['STARRED']
+              else:
+                  modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['STARRED']
+
+          # Handle trash
+          if updates.get('trash'):
+              modify_request['addLabelIds'] = modify_request.get('addLabelIds', []) + ['TRASH']
+              modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['INBOX']
+
+          # Handle label changes - skip kanban labels as they're app-specific
+          if 'labels' in updates:
+              # Kanban labels (todo, done, etc.) are app-specific and shouldn't sync to Gmail
+              # They are preserved in DB sync but not synced to Gmail
+              pass
+
+          # Only call Gmail API if there are changes to sync
+          if modify_request:
+              # Call Gmail API to modify the message
+              result = service.users().messages().modify(
+                  userId='me',
+                  id=email_id,
+                  body=modify_request
+              ).execute()
+
+              logger.info(f"[GMAIL SYNC] Synced email {email_id} modifications with Gmail: {modify_request}")
+              return result
+
+      except Exception as e:
+          logger.error(f"[GMAIL SYNC] Failed to sync email {email_id} with Gmail: {e}")
+          # Don't raise exception - DB changes should still be preserved even if Gmail sync fails
 
   async def _get_or_create_db_label_id(self, user_id: str, label_name: str) -> str:
       """Get or create a label ID in DB labels collection."""
