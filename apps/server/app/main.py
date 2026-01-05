@@ -10,6 +10,7 @@ from pymongo import AsyncMongoClient
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.mail.service import MailService
+from app.api.mail.sync_service import EmailSyncService
 from app.api.router import router as api_router
 from app.config import Settings, settings  # settings used for scheduler DB client
 
@@ -121,6 +122,25 @@ async def ensure_indexes():
         email_embeddings = db["email_embeddings"]
         await email_embeddings.create_index([("user_id", 1), ("message_id", 1)], unique=True)
         await email_embeddings.create_index([("user_id", 1)])
+
+        # DB-first architecture indexes
+        emails = db["emails"]
+        await emails.create_index([("user_id", 1), ("message_id", 1)], unique=True)
+        await emails.create_index([("user_id", 1), ("thread_id", 1)])
+        await emails.create_index([("user_id", 1), ("labels", 1)])
+        await emails.create_index([("user_id", 1), ("received_on", -1)])
+        await emails.create_index([("user_id", 1), ("has_attachments", 1)])
+
+        labels = db["labels"]
+        await labels.create_index([("user_id", 1), ("label_id", 1)], unique=True)
+
+        kanban_columns = db["kanban_columns"]
+        await kanban_columns.create_index([("user_id", 1), ("column_id", 1)], unique=True)
+        await kanban_columns.create_index([("user_id", 1), ("order", 1)])
+
+        snooze_schedules = db["snooze_schedules"]
+        await snooze_schedules.create_index([("user_id", 1), ("email_id", 1)], unique=True)
+        await snooze_schedules.create_index([("snooze_until", 1), ("status", 1)])
     finally:
         await client.close()
 
@@ -137,12 +157,12 @@ async def run_snooze_job():
 
 
 async def run_mail_sync_job():
-    """Periodic job to sync Gmail metadata into search index."""
+    """Periodic job to sync Gmail emails into DB."""
     client = AsyncMongoClient(settings.DB_CONNECTION_STRING)
     try:
         db = client[settings.DB_NAME]
-        mail_service = MailService(db)
-        await mail_service.sync_all_users()
+        sync_service = EmailSyncService(db)
+        await sync_service.sync_all_users()
     finally:
         await client.close()
 
@@ -162,15 +182,31 @@ async def run_embedding_job():
 async def on_startup():
     # Initialize indexes and start scheduler
     await ensure_indexes()
+
+    # DB-first sync initialization
+    if settings.MAIL_SYNC_STARTUP_FULL:
+        logging.info("[STARTUP] Running initial full sync for all users...")
+        client = AsyncMongoClient(settings.DB_CONNECTION_STRING)
+        try:
+            db = client[settings.DB_NAME]
+            sync_service = EmailSyncService(db)
+            await sync_service.sync_all_users()
+            logging.info("[STARTUP] Initial smart sync completed")
+        finally:
+            await client.close()
+
+    # Start in-process sync loop
+    import asyncio
+    client = AsyncMongoClient(settings.DB_CONNECTION_STRING)
+    db = client[settings.DB_NAME]
+    sync_service = EmailSyncService(db)
+
+    # Run sync loop in background
+    asyncio.create_task(sync_service.run_sync_loop())
+    logging.info(f"[STARTUP] In-process sync loop started (interval: {settings.MAIL_SYNC_INTERVAL_SECONDS}s)")
+
+    # Legacy scheduler jobs
     scheduler.add_job(run_snooze_job, "interval", minutes=1)
-    scheduler.add_job(
-        run_mail_sync_job,
-        "interval",
-        minutes=settings.MAIL_SYNC_INTERVAL_MINUTES,
-        next_run_time=datetime.now(),
-        id="mail_sync_job",
-        replace_existing=True,
-    )
     scheduler.add_job(
         run_embedding_job,
         "interval",
@@ -180,8 +216,8 @@ async def on_startup():
         replace_existing=True,
     )
     scheduler.start()
-    logging.info(f"Scheduler configured: snooze_job every 1 minute; mail_sync_job every {settings.MAIL_SYNC_INTERVAL_MINUTES} minutes; embedding_job every {settings.EMBEDDING_JOB_INTERVAL_MINUTES} minutes")
-    print("Scheduler started for Snooze jobs.")
+    logging.info(f"Scheduler configured: snooze_job every 1 minute; embedding_job every {settings.EMBEDDING_JOB_INTERVAL_MINUTES} minutes")
+    print("Scheduler started for background jobs.")
 
 
 @app.on_event("shutdown")

@@ -45,7 +45,12 @@ from app.api.mail.models import (
     ParsedMessage,
     Sender,
     Label,
-    Attachment
+    Attachment,
+    EmailDocument,
+    MailSyncState,
+    UserLabel,
+    KanbanColumn,
+    SnoozeSchedule
 )
 from app.api.agents.summarizer import Summarizer
 
@@ -57,7 +62,16 @@ class MailService:
     self.email_index_collection = self.db["email_index"]
     self.sync_state_collection = self.db["mail_sync_state"]
     self.email_embeddings_collection = self.db["email_embeddings"]
+    # New collections for DB-first architecture
+    self.emails_collection = self.db["emails"]  # Full email documents
+    self.labels_collection = self.db["labels"]
+    self.kanban_columns_collection = self.db["kanban_columns"]
+    self.snooze_schedules_collection = self.db["snooze_schedules"]
     self._summarizer: Optional[Summarizer] = None
+
+    # Import and initialize sync service
+    from app.api.mail.sync_service import EmailSyncService
+    self.sync_service = EmailSyncService(db)
 
   def _get_summarizer(self) -> Summarizer:
     if self._summarizer is None:
@@ -104,37 +118,6 @@ class MailService:
     
     return gmail_label_id
 
-  def _parse_message_for_index(self, msg_data: dict, user_id: str) -> dict:
-    payload = msg_data.get('payload', {})
-    headers = payload.get('headers', [])
-    def get_header(name: str) -> str:
-      return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
-    subject = get_header('Subject') or '(No Subject)'
-    from_header = get_header('From')
-    name, email_addr = email.utils.parseaddr(from_header)
-    internal_date = msg_data.get('internalDate')
-    received_on = datetime.fromtimestamp(int(internal_date) / 1000).isoformat() if internal_date else ""
-    label_ids = msg_data.get('labelIds', [])
-    snippet = msg_data.get('snippet', '') or ''
-    to_header = get_header('To')
-    to_list = []
-    if to_header:
-      to_list = [{"name": n, "email": e} for n, e in email.utils.getaddresses([to_header])]
-    return {
-      "user_id": user_id,
-      "message_id": msg_data.get('id'),
-      "thread_id": msg_data.get('threadId'),
-      "history_id": msg_data.get('historyId'),
-      "subject": subject,
-      "from_name": name,
-      "from_email": email_addr,
-      "snippet": snippet,
-      "received_on": received_on,
-      "labels": label_ids,
-      "to": to_list,
-      "unread": "UNREAD" in label_ids,
-      "is_embedded": False
-    }
 
   def _build_embedding_text(self, doc: Dict[str, Any]) -> str:
     subject = doc.get("subject") or ""
@@ -143,117 +126,13 @@ class MailService:
     snippet = doc.get("snippet") or ""
     return f"Subject: {subject}\nFrom: {from_name} <{from_email}>\nSnippet: {snippet}"
 
-  async def _upsert_index_doc(self, doc: dict):
-    now = datetime.utcnow().isoformat()
-    doc["updated_at"] = now
-    await self.email_index_collection.update_one(
-      {"user_id": doc["user_id"], "message_id": doc["message_id"]},
-      {"$set": doc, "$setOnInsert": {"created_at": now}},
-      upsert=True
-    )
 
-  async def _sync_from_history(self, service, user_id: str, start_history_id: str, mailbox_label_id: Optional[str], max_pages: int = 3) -> Optional[str]:
-    page_token = None
-    latest_history_id = start_history_id
-    processed: Set[str] = set()
-    pages = 0
-    while pages < max_pages:
-      history_request = service.users().history().list(
-        userId='me',
-        startHistoryId=start_history_id,
-        labelId=mailbox_label_id,
-        historyTypes=['messageAdded', 'labelsAdded', 'labelsRemoved'],
-        pageToken=page_token,
-        maxResults=200
-      )
-      history_response = history_request.execute()
-      histories = history_response.get('history', [])
-      for record in histories:
-        latest_history_id = record.get('id', latest_history_id)
-        for msg_entry in record.get('messages', []):
-          msg_id = msg_entry.get('id')
-          if not msg_id or msg_id in processed:
-            continue
-          processed.add(msg_id)
-          try:
-            msg_data = service.users().messages().get(userId='me', id=msg_id, format='metadata').execute()
-            doc = self._parse_message_for_index(msg_data, user_id)
-            await self._upsert_index_doc(doc)
-          except Exception:
-            continue
-        for added in record.get('messagesAdded', []):
-          msg_obj = added.get('message', {})
-          msg_id = msg_obj.get('id')
-          if not msg_id or msg_id in processed:
-            continue
-          processed.add(msg_id)
-          try:
-            msg_data = service.users().messages().get(userId='me', id=msg_id, format='metadata').execute()
-            doc = self._parse_message_for_index(msg_data, user_id)
-            await self._upsert_index_doc(doc)
-          except Exception:
-            continue
-      page_token = history_response.get('nextPageToken')
-      pages += 1
-      if not page_token:
-        break
-    return latest_history_id
 
-  async def _full_resync(self, service, user_id: str, mailbox_label_id: Optional[str], lookback_days: int = 90, max_pages: int = 5) -> Optional[str]:
-    cutoff = datetime.utcnow() - timedelta(days=lookback_days)
-    query_parts = [f"after:{int(cutoff.timestamp())}"]
-    page_token = None
-    pages = 0
-    latest_history_id = None
-    while pages < max_pages:
-      try:
-        results = service.users().messages().list(
-          userId='me',
-          labelIds=[mailbox_label_id] if mailbox_label_id else None,
-          q=" ".join(query_parts),
-          maxResults=100,
-          pageToken=page_token
-        ).execute()
-      except Exception:
-        break
-      messages = results.get('messages', [])
-      for msg in messages:
-        try:
-          msg_data = service.users().messages().get(
-            userId='me',
-            id=msg['id'],
-            format='metadata'
-          ).execute()
-          latest_history_id = msg_data.get('historyId') or latest_history_id
-          doc = self._parse_message_for_index(msg_data, user_id)
-          await self._upsert_index_doc(doc)
-        except Exception:
-          continue
-      page_token = results.get('nextPageToken')
-      pages += 1
-      if not page_token:
-        break
-    return latest_history_id
 
-  async def sync_email_index(self, user_id: str, mailbox_id: Optional[str] = None, lookback_days: int = 90, max_pages: int = 5):
-    service = await self.get_gmail_service(user_id)
-    mailbox_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
-    state = await self.sync_state_collection.find_one({"user_id": user_id})
-    history_id = state.get("history_id") if state else None
-    latest_history_id = None
-    if history_id:
-      try:
-        latest_history_id = await self._sync_from_history(service, user_id, history_id, mailbox_label_id, max_pages=2)
-      except Exception:
-        latest_history_id = None
-    if not latest_history_id:
-      latest_history_id = await self._full_resync(service, user_id, mailbox_label_id, lookback_days, max_pages)
-    if latest_history_id:
-      await self.sync_state_collection.update_one(
-        {"user_id": user_id},
-        {"$set": {"user_id": user_id, "history_id": latest_history_id, "updated_at": datetime.utcnow().isoformat()}},
-        upsert=True
-      )
+
+  async def sync_email_index(self, user_id: str, mailbox_id: Optional[str] = None, max_emails: Optional[int] = None):
+    """Smart sync that prioritizes recent emails and supports incremental updates."""
+    return await self.sync_service.sync_email_index(user_id, mailbox_id, max_emails)
 
   async def _upsert_embeddings_batch(self, user_id: str, docs: Iterable[Dict[str, Any]], vector_store) -> None:
     docs_list = [d for d in docs if d.get("message_id")]
@@ -493,20 +372,17 @@ class MailService:
       await self._upsert_embeddings_batch(user_id, batch_docs, vector_store)
 
   async def sync_all_users(self, mailbox_id: Optional[str] = None):
-    cursor = self.users_collection.find({"google_refresh_token": {"$exists": True}})
-    async for user in cursor:
-      user_id = str(user["_id"])
-      try:
-        await self.sync_email_index(
-          user_id,
-          mailbox_id,
-          lookback_days=settings.MAIL_SYNC_LOOKBACK_DAYS,
-          max_pages=settings.MAIL_SYNC_MAX_PAGES
-        )
-      except Exception as e:
-        logger.warning(f"[MAIL SYNC] Failed for user {user_id}: {e}")
+    """Sync all users with Gmail tokens."""
+    await self.sync_service.sync_all_users(mailbox_id)
   async def get_gmail_service(self, user_id: str):
-    user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
+    # Try to find user with ObjectId first (most common case)
+    user = None
+    try:
+        user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
+    except:
+        # If ObjectId conversion fails, try with string directly
+        user = await self.users_collection.find_one({"_id": user_id})
+
     if not user or "google_refresh_token" not in user:
       raise ValueError("User not found or missing Google refresh token.")
 
@@ -523,15 +399,94 @@ class MailService:
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
   async def get_mailboxes(self, user_id: str):
+    """Get mailboxes from DB labels collection first, fallback to Gmail API."""
+    try:
+      # Try to get labels from DB first
+      db_labels = await self.labels_collection.find({"user_id": user_id}).to_list(length=None)
+
+      if db_labels:
+        # Convert DB labels to mailbox format
+        mailboxes = []
+        for label in db_labels:
+          # Count emails with this label
+          unread_count = await self.emails_collection.count_documents({
+            "user_id": user_id,
+            "labels": label['label_id'],
+            "unread": True
+          })
+          total_count = await self.emails_collection.count_documents({
+            "user_id": user_id,
+            "labels": label['label_id']
+          })
+
+          mailboxes.append({
+            "id": label['label_id'],
+            "name": label['name'],
+            "type": label.get('type', 'user'),
+            "unread_count": unread_count,
+            "total_count": total_count
+          })
+
+        # Add system labels that might not be in DB
+        system_labels = ['INBOX', 'SENT', 'DRAFT', 'TRASH', 'SPAM', 'STARRED', 'IMPORTANT']
+        for sys_label in system_labels:
+          if not any(mb['id'] == sys_label for mb in mailboxes):
+            unread_count = await self.emails_collection.count_documents({
+              "user_id": user_id,
+              "labels": sys_label,
+              "unread": True
+            })
+            total_count = await self.emails_collection.count_documents({
+              "user_id": user_id,
+              "labels": sys_label
+            })
+
+            mailboxes.append({
+              "id": sys_label,
+              "name": sys_label.lower().capitalize(),
+              "type": "system",
+              "unread_count": unread_count,
+              "total_count": total_count
+            })
+
+        return mailboxes
+      else:
+        # Fallback to Gmail API and sync to DB
+        logger.warning("No labels found in DB, falling back to Gmail API")
+        return await self._get_mailboxes_fallback(user_id)
+
+    except Exception as e:
+      logger.warning(f"DB query failed for get_mailboxes, falling back to Gmail API: {e}")
+      return await self._get_mailboxes_fallback(user_id)
+
+  async def _get_mailboxes_fallback(self, user_id: str):
+    """Fallback implementation using Gmail API."""
     service = await self.get_gmail_service(user_id)
     results = service.users().labels().list(userId='me').execute()
     labels = results.get('labels', [])
+
+    # Sync labels to DB in background
+    for label in labels:
+      await self.labels_collection.update_one(
+        {"user_id": user_id, "label_id": label['id']},
+        {
+          "$set": {
+            "user_id": user_id,
+            "label_id": label['id'],
+            "name": label['name'],
+            "type": label.get('type', 'user'),
+            "updated_at": datetime.utcnow().isoformat()
+          },
+          "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}
+        },
+        upsert=True
+      )
 
     return [
       {
         "id": label['id'],
         "name": label['name'],
-        "type": label["type"],
+        "type": label.get("type", "user"),
         "unread_count": label.get("messagesUnread", 0),
         "total_count": label.get("messagesTotal", 0)
       }
@@ -589,13 +544,83 @@ class MailService:
     return bool(payload.get('filename'))
 
   async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
+    """Get emails from DB first, fallback to Gmail API if needed."""
+    try:
+      # Resolve mailbox label ID for filtering
+      service = await self.get_gmail_service(user_id)
+      gmail_label_id = await self._resolve_label_id(service, user_id, mailbox_id)
+
+      # Parse pagination
+      skip = 0
+      if page_token:
+        try:
+          skip = int(page_token)
+        except ValueError:
+          skip = 0
+
+      # Query DB for emails
+      query = {"user_id": user_id}
+      if gmail_label_id:
+        query["labels"] = gmail_label_id
+
+      cursor = self.emails_collection.find(query).sort("received_on", -1).skip(skip).limit(limit)
+      email_docs = await cursor.to_list(length=limit)
+
+      # Get total count for result_size_estimate
+      total_count = await self.emails_collection.count_documents(query)
+
+      thread_list = []
+      for doc in email_docs:
+        # Convert EmailDocument to ThreadPreview format
+        summary_text = None
+        if summarize and doc.get("body"):
+          try:
+            summary_text = await self._get_summarizer().summarize(doc.get("body", ""))
+          except Exception as e:
+            logger.warning(f"Summarize failed for {doc.get('message_id')}: {e}")
+
+        thread_list.append({
+          "id": doc["message_id"],
+          "history_id": doc.get("history_id"),
+          "subject": doc.get("subject", "(No Subject)"),
+          "sender": {
+            "name": doc.get("from_name", ""),
+            "email": doc.get("from_email", "")
+          },
+          "to": doc.get("to", []),
+          "received_on": doc.get("received_on", ""),
+          "unread": doc.get("unread", False),
+          "tags": doc.get("tags", []),
+          "body": doc.get("snippet", ""),
+          "summary": summary_text,
+          "has_attachments": doc.get("has_attachments", False)
+        })
+
+      # Calculate next page token
+      next_page_token = None
+      if len(email_docs) == limit and (skip + limit) < total_count:
+        next_page_token = str(skip + limit)
+
+      return {
+        "threads": thread_list,
+        "next_page_token": next_page_token,
+        "result_size_estimate": total_count
+      }
+
+    except Exception as e:
+      logger.warning(f"DB query failed for get_emails, falling back to Gmail API: {e}")
+      # Fallback to original Gmail API implementation
+      return await self._get_emails_fallback(user_id, mailbox_id, page_token, limit, summarize)
+
+  async def _get_emails_fallback(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
+    """Fallback implementation using Gmail API directly."""
     service = await self.get_gmail_service(user_id)
-    
+
     system_labels_map = {
         'inbox': 'INBOX',
         'sent': 'SENT',
         'trash': 'TRASH',
-        'drafts': 'DRAFT',  # Gmail dùng 'DRAFT' số ít
+        'drafts': 'DRAFT',
         'spam': 'SPAM',
         'starred': 'STARRED',
         'important': 'IMPORTANT'
@@ -607,25 +632,25 @@ class MailService:
         try:
             results = service.users().labels().list(userId='me').execute()
             labels = results.get('labels', [])
-            
+
             search_name = mailbox_id.lower()
             if search_name == 'todo':
                 search_name = 'to do'
-            
+
             for label in labels:
                 if label['name'].lower() == search_name:
                     gmail_label_id = label['id']
                     break
-            
+
             if not gmail_label_id:
-                print(f"Label '{mailbox_id}' not found in Gmail account.")
+                logger.warning(f"Label '{mailbox_id}' not found in Gmail account.")
                 return {
                     "threads": [],
                     "next_page_token": None,
                     "result_size_estimate": 0
                 }
         except Exception as e:
-            print(f"Error resolving label ID: {e}")
+            logger.error(f"Error resolving label ID: {e}")
             return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
 
     try:
@@ -636,7 +661,7 @@ class MailService:
           pageToken=page_token
         ).execute()
     except Exception as e:
-        print(f"Error fetching messages from Gmail: {e}")
+        logger.error(f"Error fetching messages from Gmail: {e}")
         return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
 
     messages = results.get('messages', [])
@@ -672,7 +697,7 @@ class MailService:
               to_list = [{"name": n, "email": e} for n, e in email.utils.getaddresses([to_header])]
 
           subject = get_header('Subject') or '(No Subject)'
-          
+
           internal_date = msg_data.get('internalDate')
           received_on = datetime.fromtimestamp(int(internal_date)/1000).isoformat() if internal_date else ""
 
@@ -700,7 +725,7 @@ class MailService:
             "has_attachments": has_attachments
           })
       except Exception as e:
-          print(f"Error processing message {msg.get('id')}: {e}")
+          logger.error(f"Error processing message {msg.get('id')}: {e}")
           continue
 
     return {
@@ -710,8 +735,87 @@ class MailService:
     }
 
   async def get_email_detail(self, user_id: str, email_id: str, summarize: bool = False) -> ThreadDetailResponse:
+    """Get email thread detail from DB first, fallback to Gmail API if needed."""
+    try:
+      # First try to find the message in DB
+      email_doc = await self.emails_collection.find_one({"user_id": user_id, "message_id": email_id})
+      if email_doc:
+        thread_id = email_doc["thread_id"]
+      else:
+        # Fallback: get thread_id from Gmail API
+        service = await self.get_gmail_service(user_id)
+        try:
+            msg_metadata = service.users().messages().get(userId='me', id=email_id, format='minimal').execute()
+            thread_id = msg_metadata.get('threadId')
+        except Exception:
+            raise ValueError("Message not found")
+
+      # Query all messages in the thread from DB
+      thread_docs = await self.emails_collection.find(
+        {"user_id": user_id, "thread_id": thread_id}
+      ).sort("received_on", 1).to_list(length=None)
+
+      if thread_docs:
+        # Convert DB documents to ParsedMessage format
+        parsed_messages = []
+        for doc in thread_docs:
+          parsed = self._convert_email_doc_to_parsed_message(doc)
+          if summarize:
+            try:
+              parsed.summary = await self._get_summarizer().summarize(parsed.body)
+            except Exception as e:
+              logger.warning(f"Summarize detail failed for {doc.get('message_id')}: {e}")
+          parsed_messages.append(parsed)
+
+        latest = parsed_messages[-1] if parsed_messages else None
+
+        return {
+          "messages": parsed_messages,
+          "latest": latest,
+          "has_unread": any(m.unread for m in parsed_messages),
+          "total_replies": len(parsed_messages) - 1 if parsed_messages else 0,
+          "labels": latest.tags if latest else [],
+          "is_latest_draft": False
+        }
+      else:
+        # Fallback to Gmail API if no documents found in DB
+        logger.warning(f"Thread {thread_id} not found in DB, falling back to Gmail API")
+        return await self._get_email_detail_fallback(user_id, email_id, summarize)
+
+    except Exception as e:
+      logger.warning(f"DB query failed for get_email_detail, falling back to Gmail API: {e}")
+      return await self._get_email_detail_fallback(user_id, email_id, summarize)
+
+  def _convert_email_doc_to_parsed_message(self, email_doc: dict) -> ParsedMessage:
+    """Convert EmailDocument dict to ParsedMessage format."""
+    return ParsedMessage(
+      id=email_doc["message_id"],
+      thread_id=email_doc["thread_id"],
+      title=email_doc.get("subject", "(No Subject)"),
+      subject=email_doc.get("subject", "(No Subject)"),
+      sender=Sender(
+        name=email_doc.get("from_name", ""),
+        email=email_doc.get("from_email", "")
+      ),
+      to=email_doc.get("to", []),
+      cc=email_doc.get("cc", []),
+      bcc=email_doc.get("bcc", []),
+      received_on=email_doc.get("received_on", ""),
+      unread=email_doc.get("unread", False),
+      body=email_doc.get("body", ""),
+      processed_html=email_doc.get("processed_html", ""),
+      decoded_body=email_doc.get("decoded_body"),
+      tags=email_doc.get("tags", []),
+      attachments=email_doc.get("attachments"),
+      message_id=email_doc.get("message_id_header"),
+      references=email_doc.get("references"),
+      in_reply_to=email_doc.get("in_reply_to")
+    )
+
+  async def _get_email_detail_fallback(self, user_id: str, email_id: str, summarize: bool = False) -> ThreadDetailResponse:
+    """Fallback implementation using Gmail API directly."""
     service = await self.get_gmail_service(user_id)
-    
+
     try:
         msg_metadata = service.users().messages().get(userId='me', id=email_id, format='minimal').execute()
         thread_id = msg_metadata.get('threadId')
@@ -720,21 +824,21 @@ class MailService:
 
     thread_data = service.users().threads().get(userId='me', id=thread_id, format='full').execute()
     messages = thread_data.get('messages', [])
-    
+
     parsed_messages = []
     for msg in messages:
         parsed = self._parse_gmail_message(msg)
         if summarize:
             try:
-                parsed["summary"] = await self._get_summarizer().summarize(parsed.get("body", ""))
+                parsed.summary = await self._get_summarizer().summarize(parsed.body)
             except Exception as e:
                 logger.warning(f"Summarize detail failed for {msg.get('id')}: {e}")
         parsed_messages.append(parsed)
-    
-    parsed_messages.sort(key=lambda x: x['received_on'])
-    
+
+    parsed_messages.sort(key=lambda x: x.received_on)
+
     latest = parsed_messages[-1] if parsed_messages else None
-    
+
     return {
         "messages": parsed_messages,
         "latest": latest,
@@ -1058,102 +1162,128 @@ class MailService:
           raise ValueError(f"Failed to create draft: {str(e)}")
 
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
-      service = await self.get_gmail_service(user_id)
-      
-      print(f"[MODIFY EMAIL] user_id={user_id}, email_id={email_id}, updates={updates}")
+      """Modify email properties in DB only (DB-first approach)."""
+      logger.info(f"[MODIFY EMAIL] user_id={user_id}, email_id={email_id}, updates={updates}")
 
-      add_label_ids = []
-      remove_label_ids = []
+      # Find the email document in DB
+      email_doc = await self.emails_collection.find_one({"user_id": user_id, "message_id": email_id})
+      if not email_doc:
+          raise ValueError(f"Email {email_id} not found in database")
 
+      # Prepare updates for DB
+      db_updates = {}
+      new_labels = list(email_doc.get('labels', []))
+      new_tags = list(email_doc.get('tags', []))
+
+      # Handle unread status
       if 'unread' in updates:
           if updates['unread']:
-              add_label_ids.append('UNREAD')
-              if 'UNREAD' in remove_label_ids: remove_label_ids.remove('UNREAD')
+              if 'UNREAD' not in new_labels:
+                  new_labels.append('UNREAD')
+              db_updates['unread'] = True
           else:
-              remove_label_ids.append('UNREAD')
-              if 'UNREAD' in add_label_ids: add_label_ids.remove('UNREAD')
+              if 'UNREAD' in new_labels:
+                  new_labels.remove('UNREAD')
+              db_updates['unread'] = False
 
+      # Handle starred status
       if 'starred' in updates:
           if updates['starred']:
-              add_label_ids.append('STARRED')
-              if 'STARRED' in remove_label_ids: remove_label_ids.remove('STARRED')
+              if 'STARRED' not in new_labels:
+                  new_labels.append('STARRED')
           else:
-              remove_label_ids.append('STARRED')
-              if 'STARRED' in add_label_ids: add_label_ids.remove('STARRED')
+              if 'STARRED' in new_labels:
+                  new_labels.remove('STARRED')
 
+      # Handle trash
       if updates.get('trash'):
-           add_label_ids.append('TRASH')
-           if 'TRASH' in remove_label_ids: remove_label_ids.remove('TRASH')
+          if 'TRASH' not in new_labels:
+              new_labels.append('TRASH')
 
+      # Handle label changes (kanban column management)
       if 'labels' in updates:
           labels_to_add = updates.get('labels', [])
-          
+
+          # Get or create DB labels for the new labels
           for label_name in labels_to_add:
-              real_label_id = await self._get_or_create_label_id(service, user_id, label_name)
-              
-              if real_label_id not in add_label_ids:
-                  add_label_ids.append(real_label_id)
-          
-          # Lấy danh sách tất cả label hiện tại của email để xóa các label Kanban khác
-          try:
-              msg = service.users().messages().get(userId='me', id=email_id, format='minimal').execute()
-              current_label_ids = msg.get('labelIds', [])
-              
-              # Lấy danh sách tất cả labels của user để map ID -> name
-              all_labels_result = service.users().labels().list(userId='me').execute()
-              all_labels = all_labels_result.get('labels', [])
-              label_id_to_name = {label['id']: label['name'] for label in all_labels}
-              
-              # Xác định các label là "Kanban column labels" (user labels và INBOX, STARRED, SNOOZED)
-              # System labels để giữ lại: SENT, DRAFT, TRASH, SPAM, IMPORTANT, UNREAD
-              system_labels_to_keep = ['SENT', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD', 'CATEGORY_*']
-              
-              for label_id in current_label_ids:
-                  label_name = label_id_to_name.get(label_id, label_id)
-                  
-                  # Bỏ qua nếu là label mới đang được thêm
-                  if label_id in add_label_ids:
-                      continue
-                  
-                  # Bỏ qua các system labels cần giữ
-                  if label_id in system_labels_to_keep or label_id.startswith('CATEGORY_'):
-                      continue
-                  
-                  # Xóa các label có thể là Kanban columns:
-                  # - INBOX, STARRED, SNOOZED (system labels thường dùng cho Kanban)
-                  # - Tất cả user labels (type='user')
-                  label_info = next((l for l in all_labels if l['id'] == label_id), None)
-                  if label_info:
-                      label_type = label_info.get('type', 'user')
-                      if label_id in ['INBOX', 'STARRED', 'SNOOZED'] or label_type == 'user':
-                          if label_id not in remove_label_ids:
-                              remove_label_ids.append(label_id)
-                              print(f"[KANBAN] Removing label '{label_name}' ({label_id}) to move email to new column")
-          
-          except Exception as e:
-              print(f"Warning: Could not remove old Kanban labels: {e}")
-              pass
+              label_id = await self._get_or_create_db_label_id(user_id, label_name)
+              if label_id not in new_labels:
+                  new_labels.append(label_id)
 
-      if remove_label_ids and not add_label_ids:
-          print("[WARNING] No labels would be added! Keeping INBOX to prevent email from being 'lost'")
-          remove_label_ids = [lid for lid in remove_label_ids if lid != 'INBOX']
-          if 'INBOX' not in add_label_ids:
-              add_label_ids.append('INBOX')
+              # Add to tags if not already present
+              if not any(tag['id'] == label_id for tag in new_tags):
+                  new_tags.append({'id': label_id, 'name': label_name})
 
-      body = {
-          'addLabelIds': add_label_ids,
-          'removeLabelIds': remove_label_ids
-      }
-      
-      print(f"[MODIFY EMAIL] Sending to Gmail API - add: {add_label_ids}, remove: {remove_label_ids}")
+          # Remove old kanban labels (similar to original logic but DB-only)
+          # Keep system labels: SENT, DRAFT, TRASH, SPAM, IMPORTANT, UNREAD
+          system_labels_to_keep = ['SENT', 'DRAFT', 'SPAM', 'IMPORTANT', 'UNREAD']
 
-      try:
-          service.users().messages().modify(userId='me', id=email_id, body=body).execute()
-      except Exception as e:
-          print(f"Gmail API Error: {e}")
-          raise ValueError(f"Failed to modify email labels: {str(e)}")
+          # Get all user labels to determine which ones to remove
+          user_labels = await self.labels_collection.find({"user_id": user_id}).to_list(length=None)
+          user_label_ids = [label['label_id'] for label in user_labels]
+
+          labels_to_remove = []
+          for label_id in new_labels[:]:  # Copy to avoid modifying while iterating
+              if label_id in system_labels_to_keep:
+                  continue
+              if label_id.startswith('CATEGORY_'):
+                  continue
+              # Remove kanban-related labels: INBOX, STARRED, SNOOZED, and all user labels
+              if label_id in ['INBOX', 'STARRED', 'SNOOZED'] or label_id in user_label_ids:
+                  if label_id not in new_labels:  # Don't remove if it's being added
+                      labels_to_remove.append(label_id)
+
+          # Remove old labels
+          for label_id in labels_to_remove:
+              if label_id in new_labels:
+                  new_labels.remove(label_id)
+
+          # Ensure at least INBOX if no labels would remain
+          if not new_labels:
+              new_labels.append('INBOX')
+
+      # Update the document in DB
+      if new_labels != email_doc.get('labels', []):
+          db_updates['labels'] = new_labels
+      if new_tags != email_doc.get('tags', []):
+          db_updates['tags'] = new_tags
+
+      if db_updates:
+          db_updates['updated_at'] = datetime.utcnow().isoformat()
+          await self.emails_collection.update_one(
+              {"user_id": user_id, "message_id": email_id},
+              {"$set": db_updates}
+          )
+          logger.info(f"[MODIFY EMAIL] Updated email {email_id} in DB: {db_updates}")
 
       return await self.get_email_detail(user_id, email_id)
+
+  async def _get_or_create_db_label_id(self, user_id: str, label_name: str) -> str:
+      """Get or create a label ID in DB labels collection."""
+      # Check if label exists
+      existing = await self.labels_collection.find_one({
+          "user_id": user_id,
+          "name": label_name
+      })
+
+      if existing:
+          return existing['label_id']
+
+      # Create new label
+      from app.utils.id_generator import generate_id
+      label_id = f"Label_{generate_id()}"
+
+      now = datetime.utcnow().isoformat()
+      await self.labels_collection.insert_one({
+          "user_id": user_id,
+          "label_id": label_id,
+          "name": label_name,
+          "type": "user",
+          "created_at": now,
+          "updated_at": now
+      })
+
+      return label_id
 
   def _ensure_filename_extension(self, filename: str, mime_type: str) -> str:
       """Ensure filename has proper extension based on mime type."""
@@ -1377,99 +1507,108 @@ class MailService:
           return label_name
 
   async def snooze_email(self, user_id: str, email_id: str, snooze_until: datetime):
-        service = await self.get_gmail_service(user_id)
+    """Snooze email by updating DB records only (DB-first approach)."""
+    snooze_until_utc = (
+        snooze_until.replace(tzinfo=timezone.utc)
+        if snooze_until.tzinfo is None
+        else snooze_until.astimezone(timezone.utc)
+    )
 
-        snooze_until_utc = (
-            snooze_until.replace(tzinfo=timezone.utc)
-            if snooze_until.tzinfo is None
-            else snooze_until.astimezone(timezone.utc)
-        )
+    # Get current email document
+    email_doc = await self.emails_collection.find_one({"user_id": user_id, "message_id": email_id})
+    if not email_doc:
+        raise ValueError(f"Email {email_id} not found in database")
 
-        try:
-            msg_metadata = service.users().messages().get(
-                userId='me', id=email_id, format='minimal'
-            ).execute()
-            current_labels = msg_metadata.get('labelIds', [])
-        except Exception as e:
-            raise ValueError(f"Failed to read current labels before snooze: {e}")
+    current_labels = email_doc.get('labels', [])
 
-        snooze_label_id = await self._get_or_create_label_id(service, user_id, "SNOOZED")
+    # Get or create SNOOZED label in DB
+    snooze_label_id = await self._get_or_create_db_label_id(user_id, "SNOOZED")
 
-        body = {
-            'addLabelIds': [snooze_label_id],
-            'removeLabelIds': ['INBOX']
-        }
-        try:
-            service.users().messages().modify(userId='me', id=email_id, body=body).execute()
-        except Exception as e:
-            raise ValueError(f"Gmail API Error: {e}")
+    # Update email labels in DB (add SNOOZED, remove INBOX)
+    new_labels = [label for label in current_labels if label != 'INBOX']
+    if snooze_label_id not in new_labels:
+        new_labels.append(snooze_label_id)
 
-        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
-        await self.snoozed_collection.update_one(
-            {"email_id": email_id, "user_id": user_id},
-            {
-                "$set": {
-                    "user_id": user_id,
-                    "email_id": email_id,
-                    "snooze_until": snooze_until_utc,
-                    "status": "active",
-                    "original_labels": current_labels,
-                    "updated_at": now_utc,
-                },
-                "$setOnInsert": {"created_at": now_utc},
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    await self.emails_collection.update_one(
+        {"user_id": user_id, "message_id": email_id},
+        {"$set": {"labels": new_labels, "updated_at": now_utc.isoformat()}}
+    )
+
+    # Create snooze schedule record
+    await self.snooze_schedules_collection.update_one(
+        {"email_id": email_id, "user_id": user_id},
+        {
+            "$set": {
+                "user_id": user_id,
+                "email_id": email_id,
+                "snooze_until": snooze_until_utc.isoformat(),
+                "status": "active",
+                "original_labels": current_labels,
+                "updated_at": now_utc.isoformat(),
             },
-            upsert=True
-        )
+            "$setOnInsert": {"created_at": now_utc.isoformat()},
+        },
+        upsert=True
+    )
 
-        return {"message": f"Email snoozed until {snooze_until_utc.isoformat()}"}
+    return {"message": f"Email snoozed until {snooze_until_utc.isoformat()}"}
 
   async def check_and_restore_snoozed_emails(self):
-        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
-        cursor = self.snoozed_collection.find({
-            "snooze_until": {"$lte": now_utc},
-            "status": "active"
-        })
+    """Restore expired snoozed emails by updating DB records only."""
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    cursor = self.snooze_schedules_collection.find({
+        "snooze_until": {"$lte": now_utc.isoformat()},
+        "status": "active"
+    })
 
-        async for record in cursor:
-            user_id = record["user_id"]
-            email_id = record["email_id"]
-            original_labels = record.get("original_labels") or ["INBOX"]
+    async for record in cursor:
+        user_id = record["user_id"]
+        email_id = record["email_id"]
+        original_labels = record.get("original_labels") or ["INBOX"]
 
-            labels_to_restore = [
-                label for label in original_labels if label != "SNOOZED"
-            ]
+        try:
+            logger.info(f"[SNOOZE WORKER] Restoring email {email_id} for user {user_id}")
 
-            try:
-                print(f"[SNOOZE WORKER] Restoring email {email_id} for user {user_id}")
-                service = await self.get_gmail_service(user_id)
+            # Get snooze label ID
+            snooze_label_id = await self._get_or_create_db_label_id(user_id, "SNOOZED")
 
-                snooze_label_id = await self._get_or_create_label_id(service, user_id, "SNOOZED")
+            # Update email labels in DB (restore original labels, remove SNOOZED)
+            labels_to_restore = [label for label in original_labels if label != "SNOOZED"]
 
-                body = {
-                    'addLabelIds': labels_to_restore,
-                    'removeLabelIds': [snooze_label_id]
+            await self.emails_collection.update_one(
+                {"user_id": user_id, "message_id": email_id},
+                {
+                    "$set": {
+                        "labels": labels_to_restore,
+                        "updated_at": now_utc.isoformat()
+                    }
                 }
-                service.users().messages().modify(userId='me', id=email_id, body=body).execute()
+            )
 
-                await self.snoozed_collection.update_one(
-                    {"_id": record["_id"]},
-                    {"$set": {
-                        "status": "processed",
-                        "restored_at": now_utc,
-                        "updated_at": now_utc,
-                        "last_error": None
-                    }}
-                )
-            except Exception as e:
-                await self.snoozed_collection.update_one(
-                    {"_id": record["_id"]},
-                    {"$set": {
-                        "status": "error",
-                        "last_error": str(e),
-                        "updated_at": now_utc
-                    }}
-                )
-                print(f"[SNOOZE WORKER] Error restoring email {email_id}: {e}")
+            # Mark snooze schedule as processed
+            await self.snooze_schedules_collection.update_one(
+                {"_id": record["_id"]},
+                {"$set": {
+                    "status": "processed",
+                    "restored_at": now_utc.isoformat(),
+                    "updated_at": now_utc.isoformat(),
+                    "last_error": None
+                }}
+            )
+
+            logger.info(f"[SNOOZE WORKER] Successfully restored email {email_id}")
+
+        except Exception as e:
+            logger.error(f"[SNOOZE WORKER] Error restoring email {email_id}: {e}")
+            await self.snooze_schedules_collection.update_one(
+                {"_id": record["_id"]},
+                {"$set": {
+                    "status": "error",
+                    "last_error": str(e),
+                    "updated_at": now_utc.isoformat()
+                }}
+            )
 
   async def process_embedding_queue(self):
     try:
@@ -1509,4 +1648,26 @@ class MailService:
       
     except Exception as e:
       logger.error(f"Error in process_embedding_queue: {e}")
-      logger.error(f"Error in process_embedding_queue: {e}")
+
+  async def run_sync_loop(self):
+    """Run the periodic email sync loop for all users."""
+    import asyncio
+    from app.config import settings
+
+    logger.info("[SYNC LOOP] Starting email sync loop")
+
+    while True:
+      try:
+        logger.info("[SYNC LOOP] Running periodic sync for all users")
+        await self.sync_all_users()
+        logger.info("[SYNC LOOP] Periodic sync completed")
+
+        # Also run embedding processing
+        await self.process_embedding_queue()
+        logger.info("[SYNC LOOP] Embedding processing completed")
+
+      except Exception as e:
+        logger.error(f"[SYNC LOOP] Error in sync loop: {e}")
+
+      # Sleep for configured interval
+      await asyncio.sleep(settings.MAIL_SYNC_INTERVAL_SECONDS)

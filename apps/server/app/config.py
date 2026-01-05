@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     MAIL_SYNC_INTERVAL_MINUTES: int = 10
     MAIL_SYNC_LOOKBACK_DAYS: int = 90
     MAIL_SYNC_MAX_PAGES: int = 5
+    # DB-first architecture settings
+    MAIL_SYNC_INTERVAL_SECONDS: int = 300  # 5 minutes default
+    MAIL_SYNC_STARTUP_FULL: bool = True
+    MAIL_SYNC_CONCURRENCY_LIMIT: int = 1
+    MAIL_SYNC_MAX_EMAILS_PER_BATCH: int = 1000  # Maximum emails to sync per batch
     QDRANT_URL: str = ""
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION: str = "emails"
