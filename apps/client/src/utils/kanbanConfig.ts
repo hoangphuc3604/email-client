@@ -5,9 +5,9 @@ const STORAGE_KEY = 'kanban_columns_config';
 // Default columns if nothing is saved
 export const DEFAULT_COLUMNS: KanbanColumnConfig[] = [
   { id: 'inbox', title: 'Inbox', gmailLabel: 'INBOX' },
-  { id: 'todo', title: 'To Do', gmailLabel: 'todo' },
+  { id: 'todo', title: 'To Do', gmailLabel: 'To Do' },
   { id: 'snoozed', title: 'Snoozed', gmailLabel: 'SNOOZED' },
-  { id: 'done', title: 'Done', gmailLabel: 'done' },
+  { id: 'done', title: 'Done', gmailLabel: 'Done' },
 ];
 
 /**

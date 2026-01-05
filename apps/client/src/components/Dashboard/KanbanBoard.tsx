@@ -6,6 +6,7 @@ import { FaClock, FaFilter, FaSortAmountDown, FaSortAmountUp, FaCog } from 'reac
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { getKanbanColumns, useKanbanColumns, useMoveEmail, useSnoozeEmail } from '../../hooks/useKanban';
 import { saveColumnConfig } from '../../utils/kanbanConfig';
+import mailApi from '../../api/mail';
 
 interface KanbanBoardProps {
   onOpenEmail: (email: any) => void;
@@ -62,15 +63,78 @@ export default function KanbanBoard({ onOpenEmail, searchResults }: KanbanBoardP
     }
   };
 
-  const handleSaveSettings = (newColumns: KanbanColumnConfig[]) => {
+  const handleSaveSettings = async (newColumns: KanbanColumnConfig[]) => {
     try {
+      // Sync with server
+      await syncKanbanColumnsWithServer(newColumns);
+
+      // Save to localStorage as backup
       saveColumnConfig(newColumns);
       setKanbanColumns(getKanbanColumns());
+
       // Refetch data with new column configuration
       refetch();
     } catch (error) {
       console.error('Failed to save column configuration:', error);
       alert('Failed to save configuration');
+    }
+  };
+
+  const syncKanbanColumnsWithServer = async (newColumns: KanbanColumnConfig[]) => {
+    try {
+      // Get current server config
+      const serverConfig = await mailApi.getKanbanColumns();
+      const currentServerColumns = serverConfig.columns || [];
+
+      // Convert newColumns to server format
+      const serverColumnsMap = new Map();
+      newColumns.forEach((col, index) => {
+        serverColumnsMap.set(col.id, {
+          id: col.id,
+          name: col.title,
+          gmail_label_name: col.gmailLabel,
+          order: index
+        });
+      });
+
+      // Create/update columns
+      for (const newCol of newColumns) {
+        const serverCol = currentServerColumns.find((c: any) => c.id === newCol.id);
+        const serverData = serverColumnsMap.get(newCol.id);
+
+        if (!serverCol) {
+          // Create new column
+          await mailApi.createKanbanColumn({
+            name: serverData.name,
+            gmail_label_name: serverData.gmail_label_name,
+            order: serverData.order
+          });
+        } else {
+          // Update existing column
+          const updates: any = {};
+          if (serverCol.name !== serverData.name) updates.name = serverData.name;
+          if (serverCol.gmail_label_name !== serverData.gmail_label_name) updates.gmail_label_name = serverData.gmail_label_name;
+          if (serverCol.order !== serverData.order) updates.order = serverData.order;
+
+          if (Object.keys(updates).length > 0) {
+            await mailApi.updateKanbanColumn(serverCol.id, updates);
+          }
+        }
+      }
+
+      // Delete removed columns
+      for (const serverCol of currentServerColumns) {
+        if (!newColumns.find(c => c.id === serverCol.id)) {
+          try {
+            await mailApi.deleteKanbanColumn(serverCol.id);
+          } catch (error) {
+            console.warn(`Failed to delete column ${serverCol.id}:`, error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to sync with server:', error);
+      throw error;
     }
   };
 
