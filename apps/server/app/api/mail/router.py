@@ -701,3 +701,76 @@ async def trigger_full_resync(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to trigger full resync: {str(e)}")
+
+
+@router.post("/admin/sync/process_queue", response_model=APIResponse[dict])
+async def process_sync_queue(
+    max_tasks: int = Query(10, ge=1, le=100, description="Maximum number of tasks to process"),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Process pending Gmail sync tasks from the background queue.
+    This endpoint allows manual triggering of the sync queue worker.
+    """
+    try:
+        result = await mail_service._process_sync_queue_worker(max_tasks)
+        return APIResponse(
+            data=result,
+            message=f"Processed {result['processed']} sync queue tasks"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process sync queue: {str(e)}")
+
+
+@router.get("/admin/sync/queue_status", response_model=APIResponse[dict])
+async def get_sync_queue_status(
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """
+    Get status of the Gmail sync queue.
+    Shows counts of pending, processing, completed, and failed tasks.
+    """
+    try:
+        # Get queue statistics
+        pipeline = [
+            {
+                "$group": {
+                    "_id": "$status",
+                    "count": {"$sum": 1}
+                }
+            }
+        ]
+        status_counts = await mail_service.sync_queue_collection.aggregate(pipeline).to_list(length=None)
+
+        # Convert to dict
+        queue_stats = {doc["_id"]: doc["count"] for doc in status_counts}
+
+        # Get some recent failed tasks for debugging
+        failed_tasks = await mail_service.sync_queue_collection.find(
+            {"status": "failed"}
+        ).sort("created_at", -1).limit(5).to_list(length=5)
+
+        recent_failures = []
+        for task in failed_tasks:
+            recent_failures.append({
+                "task_id": task["_id"],
+                "user_id": task["user_id"],
+                "email_id": task["email_id"],
+                "attempts": task["attempts"],
+                "error_message": task.get("error_message", ""),
+                "created_at": task["created_at"],
+                "failed_at": task.get("failed_at")
+            })
+
+        return APIResponse(
+            data={
+                "queue_stats": queue_stats,
+                "recent_failures": recent_failures,
+                "total_tasks": sum(queue_stats.values())
+            },
+            message="Sync queue status retrieved"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get sync queue status: {str(e)}")
