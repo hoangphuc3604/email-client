@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     EMBEDDING_BATCH_SIZE: int = 50
     EMBEDDING_JOB_INTERVAL_MINUTES: int = 5
 
+    # Gmail sync configuration
+    MAIL_SYNC_MODE: str = "inline"  # "inline" or "background"
+    MAIL_SYNC_RETRIES: int = 3
+    MAIL_SYNC_RETRY_BACKOFF_MS: int = 500
+    MAIL_SYNC_MAX_BACKOFF_MS: int = 10000
+    MAIL_SYNC_DISABLE: bool = False  # Master switch to disable Gmail sync for testing/offline
+
     model_config = SettingsConfigDict(env_file=".env.local")
 
 settings = Settings()

@@ -16,6 +16,9 @@ from email import encoders
 import mimetypes
 import os
 from datetime import datetime
+import asyncio
+import uuid
+import time
 
 from app.api.mail.semantic_embedding import encode_texts, MODEL_NAME
 from app.api.mail.vector_store import get_vector_store
@@ -72,6 +75,9 @@ class MailService:
     # Import and initialize sync service
     from app.api.mail.sync_service import EmailSyncService
     self.sync_service = EmailSyncService(db)
+
+    # Background sync queue collection
+    self.sync_queue_collection = self.db["mail_sync_queue"]
 
   def _get_summarizer(self) -> Summarizer:
     if self._summarizer is None:
@@ -1268,47 +1274,56 @@ class MailService:
           )
           logger.info(f"[MODIFY EMAIL] Updated email {email_id} in DB: {db_updates}")
 
-          # Sync changes with Gmail API
-          await self._sync_email_modifications_with_gmail(user_id, email_id, updates, new_labels)
+          # Sync changes with Gmail API based on mode
+          if settings.MAIL_SYNC_MODE == "background":
+              # Enqueue for background processing
+              await self._enqueue_gmail_sync_task(user_id, email_id, updates, new_labels)
+          else:
+              # Sync immediately (inline mode)
+              await self._sync_email_modifications_with_gmail(user_id, email_id, updates, new_labels)
 
       return await self.get_email_detail(user_id, email_id)
 
   async def _sync_email_modifications_with_gmail(self, user_id: str, email_id: str, updates: dict, new_labels: list):
-      """Sync email modifications with Gmail API."""
-      try:
-          service = await self.get_gmail_service(user_id)
+      """Sync email modifications with Gmail API with retry logic and failure tracking."""
+      request_id = str(uuid.uuid4())[:8]
 
-          # Prepare Gmail API modify request
-          modify_request = {}
+      # Check if Gmail sync is disabled
+      if settings.MAIL_SYNC_DISABLE:
+          logger.info(f"[GMAIL SYNC {request_id}] Gmail sync disabled for user {user_id}, email {email_id}")
+          return None
 
-          # Handle unread status
-          if 'unread' in updates:
-              if updates['unread']:
-                  modify_request['addLabelIds'] = modify_request.get('addLabelIds', []) + ['UNREAD']
-                  modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['UNREAD']
-              else:
-                  modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['UNREAD']
+      # Only sync if there are Gmail-relevant changes
+      gmail_relevant_updates = {k: v for k, v in updates.items() if k in ['unread', 'starred', 'trash']}
+      if not gmail_relevant_updates:
+          logger.debug(f"[GMAIL SYNC {request_id}] No Gmail-relevant updates for user {user_id}, email {email_id}")
+          return None
 
-          # Handle starred status
-          if 'starred' in updates:
-              if updates['starred']:
-                  modify_request['addLabelIds'] = modify_request.get('addLabelIds', []) + ['STARRED']
-              else:
-                  modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['STARRED']
+      max_retries = settings.MAIL_SYNC_RETRIES
+      base_backoff_ms = settings.MAIL_SYNC_RETRY_BACKOFF_MS
+      max_backoff_ms = settings.MAIL_SYNC_MAX_BACKOFF_MS
 
-          # Handle trash
-          if updates.get('trash'):
-              modify_request['addLabelIds'] = modify_request.get('addLabelIds', []) + ['TRASH']
-              modify_request['removeLabelIds'] = modify_request.get('removeLabelIds', []) + ['INBOX']
+      start_time = time.time()
 
-          # Handle label changes - skip kanban labels as they're app-specific
-          if 'labels' in updates:
-              # Kanban labels (todo, done, etc.) are app-specific and shouldn't sync to Gmail
-              # They are preserved in DB sync but not synced to Gmail
-              pass
+      for attempt in range(max_retries + 1):
+          attempt_start = time.time()
+          try:
+              logger.info(f"[GMAIL SYNC {request_id}] Attempt {attempt + 1}/{max_retries + 1} for user {user_id}, email {email_id}, updates: {gmail_relevant_updates}")
 
-          # Only call Gmail API if there are changes to sync
-          if modify_request:
+              service = await self.get_gmail_service(user_id)
+
+              # Prepare Gmail API modify request with conflict resolution
+              modify_request = self._prepare_gmail_modify_request(updates)
+
+              # Only call Gmail API if there are changes to sync
+              if not modify_request:
+                  logger.debug(f"[GMAIL SYNC {request_id}] No changes to sync for user {user_id}, email {email_id}")
+                  duration = (time.time() - start_time) * 1000
+                  self._log_sync_metrics("gmail_sync", user_id, email_id, request_id, duration, True, attempts=attempt+1)
+                  return None
+
+              logger.debug(f"[GMAIL SYNC {request_id}] Calling Gmail API with request: {modify_request}")
+
               # Call Gmail API to modify the message
               result = service.users().messages().modify(
                   userId='me',
@@ -1316,12 +1331,321 @@ class MailService:
                   body=modify_request
               ).execute()
 
-              logger.info(f"[GMAIL SYNC] Synced email {email_id} modifications with Gmail: {modify_request}")
+              logger.info(f"[GMAIL SYNC {request_id}] SUCCESS: Synced email {email_id} modifications with Gmail")
+
+              # Clear any previous sync failures for this email
+              await self._clear_sync_failure(user_id, email_id, request_id)
+
+              # Log success metrics
+              duration = (time.time() - start_time) * 1000
+              self._log_sync_metrics("gmail_sync", user_id, email_id, request_id, duration, True, attempts=attempt+1)
+
               return result
 
+          except Exception as e:
+              error_type = type(e).__name__
+              is_retryable = self._is_retryable_error(e)
+
+              logger.warning(f"[GMAIL SYNC {request_id}] Attempt {attempt + 1} failed for user {user_id}, email {email_id}: {error_type}: {e}, retryable: {is_retryable}")
+
+              # Record failure in DB
+              await self._record_sync_failure(user_id, email_id, request_id, attempt, error_type, str(e), is_retryable)
+
+              # If this is the last attempt or error is not retryable, stop retrying
+              if attempt >= max_retries or not is_retryable:
+                  logger.error(f"[GMAIL SYNC {request_id}] FINAL FAILURE: Sync failed for user {user_id}, email {email_id} after {attempt + 1} attempts")
+                  # Log failure metrics
+                  duration = (time.time() - start_time) * 1000
+                  self._log_sync_metrics("gmail_sync", user_id, email_id, request_id, duration, False, error_type, attempt+1)
+                  break
+
+              # Calculate backoff with exponential increase
+              backoff_ms = min(base_backoff_ms * (2 ** attempt), max_backoff_ms)
+              logger.info(f"[GMAIL SYNC {request_id}] Retrying in {backoff_ms}ms...")
+
+              await asyncio.sleep(backoff_ms / 1000)
+
+      return None
+
+  def _prepare_gmail_modify_request(self, updates: dict) -> dict:
+      """Prepare Gmail API modify request with conflict resolution and de-duplication."""
+      add_label_ids = []
+      remove_label_ids = []
+
+      # Handle unread status
+      if 'unread' in updates:
+          if updates['unread']:
+              # Add UNREAD label
+              if 'UNREAD' not in add_label_ids:
+                  add_label_ids.append('UNREAD')
+              # Ensure UNREAD is not in remove list
+              if 'UNREAD' in remove_label_ids:
+                  remove_label_ids.remove('UNREAD')
+          else:
+              # Remove UNREAD label
+              if 'UNREAD' not in remove_label_ids:
+                  remove_label_ids.append('UNREAD')
+              # Ensure UNREAD is not in add list
+              if 'UNREAD' in add_label_ids:
+                  add_label_ids.remove('UNREAD')
+
+      # Handle starred status
+      if 'starred' in updates:
+          if updates['starred']:
+              # Add STARRED label
+              if 'STARRED' not in add_label_ids:
+                  add_label_ids.append('STARRED')
+              # Ensure STARRED is not in remove list
+              if 'STARRED' in remove_label_ids:
+                  remove_label_ids.remove('STARRED')
+          else:
+              # Remove STARRED label
+              if 'STARRED' not in remove_label_ids:
+                  remove_label_ids.append('STARRED')
+              # Ensure STARRED is not in add list
+              if 'STARRED' in add_label_ids:
+                  add_label_ids.remove('STARRED')
+
+      # Handle trash
+      if updates.get('trash'):
+          # Add TRASH label
+          if 'TRASH' not in add_label_ids:
+              add_label_ids.append('TRASH')
+          # Remove INBOX label (when moving to trash)
+          if 'INBOX' not in remove_label_ids:
+              remove_label_ids.append('INBOX')
+          # Ensure TRASH is not in remove list
+          if 'TRASH' in remove_label_ids:
+              remove_label_ids.remove('TRASH')
+
+      # Build the request only if there are changes
+      modify_request = {}
+      if add_label_ids:
+          modify_request['addLabelIds'] = add_label_ids
+      if remove_label_ids:
+          modify_request['removeLabelIds'] = remove_label_ids
+
+      return modify_request
+
+  def _is_retryable_error(self, error: Exception) -> bool:
+      """Determine if an error is retryable."""
+      from googleapiclient.errors import HttpError
+
+      if isinstance(error, HttpError):
+          # Retry on server errors (5xx) and rate limit (429)
+          if error.resp.status in [500, 502, 503, 504, 429]:
+              return True
+          # Don't retry on auth errors (401, 403) or client errors (4xx except 429)
+          if error.resp.status in [401, 403] or (400 <= error.resp.status < 500 and error.resp.status != 429):
+              return False
+          # Retry on other 4xx errors
+          return True
+
+      # Retry on network errors, timeouts, etc.
+      error_str = str(error).lower()
+      retryable_patterns = ['timeout', 'connection', 'network', 'dns', 'temporary']
+      return any(pattern in error_str for pattern in retryable_patterns)
+
+  async def _record_sync_failure(self, user_id: str, email_id: str, request_id: str, attempt: int, error_type: str, error_message: str, is_retryable: bool):
+      """Record sync failure in the mail_sync_state collection."""
+      try:
+          failure_record = {
+              "user_id": user_id,
+              "email_id": email_id,
+              "request_id": request_id,
+              "attempt": attempt,
+              "error_type": error_type,
+              "error_message": error_message[:500],  # Truncate long messages
+              "is_retryable": is_retryable,
+              "timestamp": datetime.utcnow().isoformat(),
+              "resolved": False
+          }
+
+          # Update sync state with failure info
+          await self.sync_state_collection.update_one(
+              {"user_id": user_id},
+              {
+                  "$set": {
+                      "last_sync_failure": failure_record,
+                      "updated_at": datetime.utcnow().isoformat()
+                  },
+                  "$inc": {"sync_failure_count": 1}
+              },
+              upsert=True
+          )
+
+          logger.debug(f"[GMAIL SYNC {request_id}] Recorded sync failure for user {user_id}, email {email_id}")
+
       except Exception as e:
-          logger.error(f"[GMAIL SYNC] Failed to sync email {email_id} with Gmail: {e}")
-          # Don't raise exception - DB changes should still be preserved even if Gmail sync fails
+          logger.error(f"[GMAIL SYNC {request_id}] Failed to record sync failure: {e}")
+
+  async def _clear_sync_failure(self, user_id: str, email_id: str, request_id: str):
+      """Clear sync failure records when sync succeeds."""
+      try:
+          # Remove specific email failure from sync state
+          await self.sync_state_collection.update_one(
+              {"user_id": user_id},
+              {
+                  "$unset": {f"email_sync_failures.{email_id}": 1},
+                  "$set": {"updated_at": datetime.utcnow().isoformat()}
+              }
+          )
+
+          logger.debug(f"[GMAIL SYNC {request_id}] Cleared sync failure for user {user_id}, email {email_id}")
+
+      except Exception as e:
+          logger.error(f"[GMAIL SYNC {request_id}] Failed to clear sync failure: {e}")
+
+  def _log_sync_metrics(self, operation: str, user_id: str, email_id: str, request_id: str, duration_ms: float, success: bool, error_type: str = None, attempts: int = 1):
+      """Log sync operation metrics for monitoring."""
+      # This could be enhanced to send to a metrics system like Prometheus, DataDog, etc.
+      # For now, we'll use structured logging
+      log_data = {
+          "operation": operation,
+          "user_id": user_id,
+          "email_id": email_id,
+          "request_id": request_id,
+          "duration_ms": round(duration_ms, 2),
+          "success": success,
+          "attempts": attempts,
+          "timestamp": datetime.utcnow().isoformat()
+      }
+
+      if error_type:
+          log_data["error_type"] = error_type
+
+      # Log at appropriate level
+      if success:
+          logger.info(f"[SYNC METRICS] {operation} succeeded: {log_data}")
+      else:
+          logger.warning(f"[SYNC METRICS] {operation} failed: {log_data}")
+
+  async def _enqueue_gmail_sync_task(self, user_id: str, email_id: str, updates: dict, new_labels: list) -> str:
+      """Enqueue a Gmail sync task for background processing."""
+      task_id = str(uuid.uuid4())
+
+      task = {
+          "_id": task_id,
+          "user_id": user_id,
+          "email_id": email_id,
+          "updates": updates,
+          "new_labels": new_labels,
+          "status": "pending",
+          "created_at": datetime.utcnow().isoformat(),
+          "attempts": 0,
+          "last_attempt_at": None,
+          "error_message": None
+      }
+
+      await self.sync_queue_collection.insert_one(task)
+
+      logger.info(f"[SYNC QUEUE] Enqueued Gmail sync task {task_id} for user {user_id}, email {email_id}")
+      return task_id
+
+  async def _process_sync_queue_worker(self, max_tasks: int = 10):
+      """Process pending Gmail sync tasks from the queue (worker function)."""
+      logger.info("[SYNC QUEUE] Starting sync queue worker...")
+
+      # Find pending tasks, ordered by creation time
+      pending_tasks = await self.sync_queue_collection.find(
+          {"status": "pending"}
+      ).sort("created_at", 1).limit(max_tasks).to_list(length=max_tasks)
+
+      processed_count = 0
+      success_count = 0
+      failure_count = 0
+
+      for task in pending_tasks:
+          task_id = task["_id"]
+          user_id = task["user_id"]
+          email_id = task["email_id"]
+          updates = task["updates"]
+          new_labels = task["new_labels"]
+
+          try:
+              logger.info(f"[SYNC QUEUE] Processing task {task_id} for user {user_id}, email {email_id}")
+
+              # Update task status to processing
+              await self.sync_queue_collection.update_one(
+                  {"_id": task_id},
+                  {
+                      "$set": {
+                          "status": "processing",
+                          "last_attempt_at": datetime.utcnow().isoformat()
+                      },
+                      "$inc": {"attempts": 1}
+                  }
+              )
+
+              # Perform the sync
+              result = await self._sync_email_modifications_with_gmail(user_id, email_id, updates, new_labels)
+
+              if result is not None:
+                  # Mark task as completed
+                  await self.sync_queue_collection.update_one(
+                      {"_id": task_id},
+                      {
+                          "$set": {
+                              "status": "completed",
+                              "completed_at": datetime.utcnow().isoformat()
+                          }
+                      }
+                  )
+                  success_count += 1
+                  logger.info(f"[SYNC QUEUE] Task {task_id} completed successfully")
+              else:
+                  # Sync returned None (no changes to sync or disabled)
+                  await self.sync_queue_collection.update_one(
+                      {"_id": task_id},
+                      {
+                          "$set": {
+                              "status": "completed",
+                              "completed_at": datetime.utcnow().isoformat(),
+                              "error_message": "No changes to sync or sync disabled"
+                          }
+                      }
+                  )
+                  success_count += 1
+                  logger.info(f"[SYNC QUEUE] Task {task_id} completed (no changes to sync)")
+
+          except Exception as e:
+              failure_count += 1
+              error_msg = str(e)
+
+              # Check if we should retry
+              max_attempts = settings.MAIL_SYNC_RETRIES + 1
+              current_attempts = task.get("attempts", 0) + 1
+
+              if current_attempts >= max_attempts:
+                  # Mark as failed permanently
+                  await self.sync_queue_collection.update_one(
+                      {"_id": task_id},
+                      {
+                          "$set": {
+                              "status": "failed",
+                              "error_message": error_msg,
+                              "failed_at": datetime.utcnow().isoformat()
+                          }
+                      }
+                  )
+                  logger.error(f"[SYNC QUEUE] Task {task_id} failed permanently after {current_attempts} attempts: {error_msg}")
+              else:
+                  # Reset to pending for retry
+                  await self.sync_queue_collection.update_one(
+                      {"_id": task_id},
+                      {
+                          "$set": {
+                              "status": "pending",
+                              "error_message": error_msg
+                          }
+                      }
+                  )
+                  logger.warning(f"[SYNC QUEUE] Task {task_id} failed, will retry (attempt {current_attempts}/{max_attempts}): {error_msg}")
+
+          processed_count += 1
+
+      logger.info(f"[SYNC QUEUE] Worker completed: processed {processed_count} tasks, {success_count} successful, {failure_count} failed")
+      return {"processed": processed_count, "successful": success_count, "failed": failure_count}
 
   async def _get_or_create_db_label_id(self, user_id: str, label_name: str) -> str:
       """Get or create a label ID in DB labels collection."""
