@@ -246,7 +246,18 @@ class AuthService:
     
     async def revoke_refresh_token(self, refresh_token: str):
         hashed_token = hash_token(refresh_token)
+        # Find the token document so we can revoke all tokens for the associated user
+        token_doc = await self.refresh_tokens_collection.find_one({"token": hashed_token})
+        if not token_doc:
+            # Token not found — nothing to revoke
+            return
+
+        user_id = token_doc["user_id"]
+        # Revoke all refresh tokens for this user (existing helper)
+        await self._revoke_all_user_tokens(user_id)
+
+        # Ensure the current token is also marked revoked with timestamp
         await self.refresh_tokens_collection.update_one(
-            {"token": hashed_token},
+            {"_id": token_doc["_id"]},
             {"$set": {"revoked": True, "revoked_at": datetime.utcnow()}}
         )

@@ -1,7 +1,8 @@
 import { Card, Badge, Spinner } from 'react-bootstrap';
-import { FaStar, FaRegStar, FaClock } from 'react-icons/fa';
+import { FaStar, FaRegStar, FaClock, FaExternalLinkAlt } from 'react-icons/fa';
 import { useEffect, useState, useRef } from 'react';
 import mailApi from '../../api/mail';
+import { getGmailMessageUrl } from '../../utils/gmail';
 
 interface KanbanCardProps {
   email: any;
@@ -117,9 +118,19 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
         </div> 
         
         {/* Subject */}
-        <h6 className="mb-2" style={{ fontWeight: email.unread ? 'bold' : 'normal', color: '#fff' }}>
-          {email.subject}
-        </h6>
+        <div className="d-flex justify-content-between align-items-start">
+          <h6 className="mb-2" style={{ fontWeight: email.unread ? 'bold' : 'normal', color: '#fff' }}>
+            {email.subject}
+          </h6>
+          <FaExternalLinkAlt
+            style={{ cursor: 'pointer', fontSize: '0.8em', opacity: 0.7 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(getGmailMessageUrl(email.id), '_blank');
+            }}
+            title="Open in Gmail"
+          />
+        </div>
         
         {/* Summary */}
         <Card.Text style={{ fontSize: '0.85rem', color: '#b8b8b8', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
