@@ -155,12 +155,12 @@ class MailService:
       items.append(
         {
           "message_id": message_id,
+          "subject": doc.get("subject", ""),
+          "from_name": doc.get("from_name", ""),
+          "from_email": doc.get("from_email", ""),
+          "snippet": doc.get("snippet", ""),
+          "labels": labels if isinstance(labels, list) else [labels],
           "embedding": emb,
-          "metadata": {
-            "labels": labels if isinstance(labels, list) else [labels],
-            "model": MODEL_NAME,
-            "updated_at": now,
-          },
         }
       )
     
@@ -301,6 +301,10 @@ class MailService:
 
   async def search_emails_semantic(self, user_id: str, query: str, mailbox_id: Optional[str], page: int, limit: int):
     logger.info(f"[SEMANTIC SEARCH] user_id={user_id}, query='{query}', mailbox_id={mailbox_id}, page={page}, limit={limit}")
+
+    # Minimum similarity score threshold for relevance
+    SCORE_THRESHOLD = 0.8
+
     mailbox_label_id: Optional[str] = None
     if mailbox_id:
       try:
@@ -312,7 +316,7 @@ class MailService:
     vector_store = get_vector_store()
     top_k = page * limit + 10
     scored = vector_store.query(user_id, query_embedding, top_k, mailbox_label_id)
-    
+
     if not scored:
       logger.info("[SEMANTIC SEARCH] No vectors found, attempting lazy rebuild from Mongo")
       await self._rebuild_semantic_index_for_user(user_id)
@@ -320,7 +324,15 @@ class MailService:
       if not scored:
         logger.info("[SEMANTIC SEARCH] No vectors after rebuild, returning empty result")
         return []
-        
+
+    # Filter results by similarity score threshold
+    scored = [(m_id, score, label_id) for m_id, score, label_id in scored if score >= SCORE_THRESHOLD]
+    logger.info(f"[SEMANTIC SEARCH] Filtered to {len(scored)} results above threshold {SCORE_THRESHOLD}")
+
+    if not scored:
+      logger.info(f"[SEMANTIC SEARCH] No results above threshold {SCORE_THRESHOLD}, returning empty result")
+      return []
+
     scored.sort(key=lambda x: x[1], reverse=True)
       
     message_ids = [m_id for m_id, _, _ in scored]

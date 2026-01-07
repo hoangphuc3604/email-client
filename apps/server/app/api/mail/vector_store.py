@@ -51,13 +51,14 @@ class QdrantVectorStore:
         for item in items:
             message_id = item["message_id"]
             embedding = item["embedding"]
-            metadata = item.get("metadata", {})
-            labels = metadata.get("labels") or item.get("labels") or []
             payload = {
-                **metadata,
                 "user_id": user_id,
                 "message_id": message_id,
-                "labels": labels,
+                "subject": item.get("subject", ""),
+                "from_name": item.get("from_name", ""),
+                "from_email": item.get("from_email", ""),
+                "snippet": item.get("snippet", ""),
+                "labels": item.get("labels", []),
             }
             points.append(
                 qm.PointStruct(
