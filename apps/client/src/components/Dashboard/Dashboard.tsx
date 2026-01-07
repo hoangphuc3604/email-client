@@ -13,6 +13,7 @@ import {
 import Particle from '../Particle'
 import './Dashboard.css'
 import mailApi from '../../api/mail'
+import { getGmailMessageUrl } from '../../utils/gmail'
 import {
   FaInbox,
   FaStar,
@@ -27,6 +28,7 @@ import {
   FaEnvelope,
   FaFileArchive,
   FaPen,
+  FaExternalLinkAlt,
   FaDownload,
   FaClock,
   FaTasks,
@@ -946,6 +948,15 @@ export default function Dashboard() {
             </Button>
           </div>
           <div className="ms-auto d-flex align-items-center">
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => window.open(getGmailMessageUrl(selectedEmail.id), '_blank')}
+              className="me-2"
+              title="Open in Gmail"
+            >
+              <FaExternalLinkAlt />
+            </Button>
             {/* Back button logic: clears selectedEmail, returning to list or board */}
             <Button variant="outline-secondary" size="sm" onClick={() => { setSelectedEmail(null); setMobileView('list') }} className="me-2">
               Back
