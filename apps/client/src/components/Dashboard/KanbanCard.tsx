@@ -1,5 +1,5 @@
 import { Card, Badge, Spinner } from 'react-bootstrap';
-import { FaStar, FaRegStar, FaClock, FaExternalLinkAlt } from 'react-icons/fa';
+import { FaClock, FaExternalLinkAlt } from 'react-icons/fa';
 import { useEffect, useState, useRef } from 'react';
 import mailApi from '../../api/mail';
 import { getGmailMessageUrl } from '../../utils/gmail';
@@ -15,7 +15,6 @@ const summaryFetchedCache = new Set<string>();
 
 export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps) {
   const sender = typeof email.sender === 'string' ? email.sender : (email.sender?.name || email.sender?.email || 'Unknown');
-  const isStarred = (email.labels || []).includes('starred') || (email.tags || []).some((t: any) => t.id === 'starred');
   
   const [summary, setSummary] = useState<string>('');
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -97,40 +96,34 @@ export default function KanbanCard({ email, onClick, onSnooze }: KanbanCardProps
           </small>
           
           {/* Khu vực Action Icons: Snooze & Star - Dùng stopPropagation để tránh kích hoạt mở mail */}
-          <div onClick={(e) => e.stopPropagation()} className="d-flex align-items-center gap-2"> 
+          <div onClick={(e) => e.stopPropagation()} className="d-flex align-items-center gap-2">
               {/* Nút Snooze */}
               {onSnooze && (
-                <FaClock 
-                  className="text-secondary hover-icon" 
-                  style={{cursor: 'pointer'}} 
+                <FaClock
+                  className="text-secondary hover-icon"
+                  style={{cursor: 'pointer'}}
                   title="Snooze"
                   onClick={() => onSnooze(email.id)}
                 />
               )}
-              
-              {/* Nút Star */}
-              {isStarred ? (
-                <FaStar className="text-warning" style={{cursor: 'pointer'}} /> 
-              ) : (
-                <FaRegStar className="text-secondary" style={{cursor: 'pointer'}} />
-              )}
+
+              {/* Nút Open in Gmail */}
+              <FaExternalLinkAlt
+                className="text-secondary"
+                style={{cursor: 'pointer'}}
+                title="Open in Gmail"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(getGmailMessageUrl(email.id), '_blank');
+                }}
+              />
           </div>
         </div> 
         
         {/* Subject */}
-        <div className="d-flex justify-content-between align-items-start">
-          <h6 className="mb-2" style={{ fontWeight: email.unread ? 'bold' : 'normal', color: '#fff' }}>
-            {email.subject}
-          </h6>
-          <FaExternalLinkAlt
-            style={{ cursor: 'pointer', fontSize: '0.8em', opacity: 0.7 }}
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(getGmailMessageUrl(email.id), '_blank');
-            }}
-            title="Open in Gmail"
-          />
-        </div>
+        <h6 className="mb-2" style={{ fontWeight: email.unread ? 'bold' : 'normal', color: '#fff' }}>
+          {email.subject}
+        </h6>
         
         {/* Summary */}
         <Card.Text style={{ fontSize: '0.85rem', color: '#b8b8b8', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
