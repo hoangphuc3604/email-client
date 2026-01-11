@@ -32,6 +32,9 @@ import {
   FaDownload,
   FaClock,
   FaTasks,
+  FaBan,
+  FaExclamationTriangle,
+  FaFolder,
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
@@ -47,6 +50,8 @@ const LABEL_NAME_MAP: Record<string, string> = {
   'SENT': 'Sent',
   'DRAFT': 'Drafts',
   'TRASH': 'Trash',
+  'SPAM': 'Spam',
+  'IMPORTANT': 'Important',
   'SNOOZED': 'Snoozed',
   'TODO': 'Todo',
   'DONE': 'Done',
@@ -85,6 +90,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false)
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set()) // Track loading state per folder
   const listRef = useRef<HTMLDivElement | null>(null)
   const scrollTopRef = useRef<number>(0)
   const isDraggingRef = useRef(false)
@@ -259,12 +265,21 @@ export default function Dashboard() {
       setSearchParams({});
     }
 
+    // Reset all states for clean folder switch
     setSelectedFolder(id)
     setSelectedEmail(null)
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
-    
+    setError(null) // Clear any previous errors
+    setLoadingMore(false) // Reset loading more state
+
+    // Reset scroll position for new folder
+    if (listRef.current) {
+      listRef.current.scrollTop = 0
+      scrollTopRef.current = 0
+    }
+
     // Không load lại nếu là folder search_results (vì dữ liệu lấy từ API search)
     if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
       loadFolderData(id, true)
@@ -275,7 +290,7 @@ export default function Dashboard() {
     if (folderId === 'search_results') return; // Bỏ qua nếu là search results
 
     if (isInitial) {
-      setLoading(true)
+      setLoadingFolders(prev => new Set([...prev, folderId]))
     } else {
       setLoadingMore(true)
       if (listRef.current) {
@@ -310,11 +325,23 @@ export default function Dashboard() {
         updated.delete(folderId)
         return updated
       })
-    } catch (e) {
+    } catch (e: any) {
       console.error(`Error loading folder ${folderId}:`, e)
+      if (isInitial) {
+        setError(`Failed to load ${folderId} emails: ${e.message || 'Unknown error'}`)
+        setLoadingFolders(prev => {
+          const updated = new Set(prev)
+          updated.delete(folderId)
+          return updated
+        })
+      }
     } finally {
       if (isInitial) {
-        setLoading(false)
+        setLoadingFolders(prev => {
+          const updated = new Set(prev)
+          updated.delete(folderId)
+          return updated
+        })
       } else {
         setLoadingMore(false)
       }
@@ -382,22 +409,12 @@ export default function Dashboard() {
     setLoadingMailboxes(true)
     try {
       const data = await mailApi.listMailboxes()
-      const filtered = (data || []).filter((box: any) => {
-        const idUpper = String(box.id).toUpperCase()
-        const nameUpper = String(box.name || '').toUpperCase()
-
-        const isSystem = ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(idUpper) || ['INBOX', 'STARRED', 'SENT', 'DRAFT', 'TRASH'].includes(nameUpper)
-        const isSnoozed = idUpper === 'SNOOZED' || nameUpper === 'SNOOZED'
-        const isTodo = idUpper === 'TODO' || nameUpper === 'TODO' || nameUpper === 'TO DO'
-        const isDone = idUpper === 'DONE' || nameUpper === 'DONE'
-
-        return isSystem || isSnoozed || isTodo || isDone
-      }).map((box: any) => {
+      const filtered = (data || []).map((box: any) => {
         const idUpper = String(box.id).toUpperCase()
         const nameUpper = String(box.name || '').toUpperCase()
         let displayName = LABEL_NAME_MAP[idUpper] || box.name
         let normalizedId = String(box.id).toLowerCase()
-        
+
         // Normalize IDs and display names for custom labels
         if (nameUpper === 'TODO' || nameUpper === 'TO DO') {
           normalizedId = 'todo'
@@ -409,7 +426,7 @@ export default function Dashboard() {
           normalizedId = 'snoozed'
           displayName = 'Snoozed'
         }
-        
+
         return {
           ...box,
           id: normalizedId,
@@ -417,7 +434,30 @@ export default function Dashboard() {
           unreadCount: box.unread_count || 0
         }
       })
-      setMailboxes(filtered.length > 0 ? filtered : [])
+
+      // Remove duplicates by normalized ID
+      const seenIds = new Set()
+      const uniqueFiltered = filtered.filter((box: any) => {
+        const nameUpper = String(box.name || '').toUpperCase()
+        let normalizedId = String(box.id).toLowerCase()
+
+        // Normalize IDs for deduplication
+        if (nameUpper === 'TODO' || nameUpper === 'TO DO') {
+          normalizedId = 'todo'
+        } else if (nameUpper === 'DONE') {
+          normalizedId = 'done'
+        } else if (nameUpper === 'SNOOZED') {
+          normalizedId = 'snoozed'
+        }
+
+        if (seenIds.has(normalizedId)) {
+          return false
+        }
+        seenIds.add(normalizedId)
+        return true
+      })
+
+      setMailboxes(uniqueFiltered.length > 0 ? uniqueFiltered : [])
       setLoadingMailboxes(false)
       
       // Nếu có query search thì không load inbox mặc định để tránh ghi đè UI
@@ -464,14 +504,14 @@ export default function Dashboard() {
       
       setSelectedEmail({
         ...message,
-        id: email.id, 
-        messageId: actualMessageId, 
         sender: senderStr,
         body: processedHtml,
         subject: message.subject || message.title || '(No Subject)',
         to: message.to || [],
         cc: message.cc || [],
-        attachments: message.attachments || []
+        attachments: message.attachments || [],
+        id: email.id,
+        messageId: actualMessageId
       })
       
       if (email.unread) {
@@ -506,18 +546,18 @@ export default function Dashboard() {
       return updated
     })
     
-    if (selectedFolder === 'drafts' || (email.labels && email.labels.includes('drafts'))) {
+    if (selectedFolder === 'drafts' || (email.tags && email.tags.some((tag: any) => tag.id === 'DRAFT'))) {
       setComposeTo(email.to?.[0]?.email || '')
       setComposeSubject(email.subject || '')
       setComposeBody(email.body || email.preview || '')
       setShowCompose(true)
-      
+
       setPreviewsMap((prev) => ({
         ...prev,
         drafts: (prev['drafts'] || []).filter((e: any) => e.id !== email.id)
       }))
-      
-      return 
+
+      return
     }
     
     setMobileView('detail')
@@ -619,9 +659,9 @@ export default function Dashboard() {
 
   function deleteCurrentEmail() {
     if (!selectedEmail) return
-    
+
     const emailId = String(selectedEmail.id)
-    
+
     if (selectedFolder === 'trash') {
       setPreviewsMap((prev) => {
         const updated = { ...prev }
@@ -630,38 +670,45 @@ export default function Dashboard() {
         })
         return updated
       })
-      
+
       setSelectedEmail(null)
       setMobileView('list')
       return
     }
-    
+
     try {
       mailApi.modifyEmail(emailId, { labels: ['trash'] }).catch(() => {})
     } catch (e) {}
-    
+
     setPreviewsMap((prev) => {
       const updated = { ...prev }
-      const movedEmails: any[] = []
-      
-      Object.keys(updated).forEach(folder => {
-        const emails = updated[folder] || []
-        const remaining: any[] = []
-        emails.forEach((e: any) => {
-          if (String(e.id) === emailId) {
-            movedEmails.push({ ...e, labels: ['trash'] })
-          } else {
-            remaining.push(e)
-          }
+
+      if (selectedFolder === 'drafts' || (selectedEmail.tags && selectedEmail.tags.some((tag: any) => tag.id === 'DRAFT'))) {
+        // For draft folder, just remove the email from UI
+        updated[selectedFolder] = (updated[selectedFolder] || []).filter((e: any) => String(e.id) !== emailId)
+      } else {
+        // For other folders, move to trash
+        const movedEmails: any[] = []
+
+        Object.keys(updated).forEach(folder => {
+          const emails = updated[folder] || []
+          const remaining: any[] = []
+          emails.forEach((e: any) => {
+            if (String(e.id) === emailId) {
+              movedEmails.push({ ...e, labels: ['trash'] })
+            } else {
+              remaining.push(e)
+            }
+          })
+          updated[folder] = remaining
         })
-        updated[folder] = remaining
-      })
-      
-      updated['trash'] = [...(updated['trash'] || []), ...movedEmails]
-      
+
+        updated['trash'] = [...(updated['trash'] || []), ...movedEmails]
+      }
+
       return updated
     })
-    
+
     setSelectedEmail(null)
     setMobileView('list')
   }
@@ -741,17 +788,37 @@ export default function Dashboard() {
   const [replyBody, setReplyBody] = useState('')
   const [replyAttachments, setReplyAttachments] = useState<File[]>([])
   const [replyingToId, setReplyingToId] = useState<string | null>(null)
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
 
   function handleReply(email: any) {
-    const senderEmail = typeof email.sender === 'string' 
-      ? email.sender 
-      : (email.sender?.email || 'unknown@example.com')
-    
+    let senderEmail = 'unknown@example.com'
+    let senderDisplay = 'Unknown'
+
+    if (typeof email.sender === 'string') {
+      senderEmail = email.sender
+      senderDisplay = email.sender
+    } else if (email.sender?.email) {
+      senderEmail = email.sender.email
+      senderDisplay = email.sender.name ? `${email.sender.name} <${email.sender.email}>` : email.sender.email
+    }
+
     setReplyTo(senderEmail)
     setReplySubject(email.subject?.startsWith('Re:') ? email.subject : `Re: ${email.subject || '(no subject)'}`)
-    setReplyBody(`\n\n--- Original Message ---\nFrom: ${email.sender}\nSubject: ${email.subject || '(no subject)'}\n\n`)
+    setReplyBody(`\n\n--- Original Message ---\nFrom: ${senderDisplay}\nSubject: ${email.subject || '(no subject)'}\n\n`)
     setReplyingToId(email.id)
     setShowReply(true)
+  }
+
+  function handleEditDraft(email: any) {
+    setEditingDraftId(email.id)
+    setComposeTo(email.to?.[0]?.email || '')
+    setComposeCc(email.cc?.[0]?.email || '')
+    setComposeBcc(email.bcc?.[0]?.email || '')
+    setComposeSubject(email.subject || '')
+    setComposeBody(email.body || email.processed_html || '')
+    setComposeAttachments([])
+    setShowCcBcc(false)
+    setShowCompose(true)
   }
 
   async function handleCloseReply() {
@@ -794,7 +861,13 @@ export default function Dashboard() {
       alert('Please enter a recipient email address')
       return
     }
-    
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(replyTo.trim())) {
+      alert('Please enter a valid email address in the "To" field')
+      return
+    }
+
     if (!replyingToId) {
       alert('Error: Original email ID is missing')
       return
@@ -826,18 +899,32 @@ export default function Dashboard() {
 
   async function handleCloseCompose() {
     if (composeTo || composeCc || composeBcc || composeSubject || composeBody || composeAttachments.length > 0) {
-      const saveToDraft = confirm('Save this email to drafts before closing?')
+      const message = editingDraftId ? 'Save changes to this draft?' : 'Save this email to drafts before closing?'
+      const saveToDraft = confirm(message)
       if (saveToDraft) {
         try {
-          await mailApi.createDraft({
-            to: composeTo,
-            cc: composeCc || undefined,
-            bcc: composeBcc || undefined,
-            subject: composeSubject || '(no subject)',
-            body: composeBody,
-            attachments: composeAttachments.length > 0 ? composeAttachments : undefined
-          })
-          
+          if (editingDraftId) {
+            // When editing existing draft, update it directly
+            await mailApi.updateDraft(editingDraftId, {
+              to: composeTo,
+              cc: composeCc || undefined,
+              bcc: composeBcc || undefined,
+              subject: composeSubject || '(no subject)',
+              body: composeBody,
+              attachments: composeAttachments.length > 0 ? composeAttachments : undefined
+            })
+          } else {
+            // Create new draft
+            await mailApi.createDraft({
+              to: composeTo,
+              cc: composeCc || undefined,
+              bcc: composeBcc || undefined,
+              subject: composeSubject || '(no subject)',
+              body: composeBody,
+              attachments: composeAttachments.length > 0 ? composeAttachments : undefined
+            })
+          }
+
           setShowCompose(false)
           setComposeTo('')
           setComposeCc('')
@@ -846,6 +933,7 @@ export default function Dashboard() {
           setComposeBody('')
           setComposeAttachments([])
           setShowCcBcc(false)
+          setEditingDraftId(null)
 
           alert('Draft saved successfully!')
           await refreshFolder()
@@ -855,7 +943,7 @@ export default function Dashboard() {
         }
       }
     }
-    
+
     setShowCompose(false)
     setComposeTo('')
     setComposeCc('')
@@ -864,6 +952,7 @@ export default function Dashboard() {
     setComposeBody('')
     setComposeAttachments([])
     setShowCcBcc(false)
+    setEditingDraftId(null)
   }
 
   async function sendCompose() {
@@ -890,7 +979,8 @@ export default function Dashboard() {
       setComposeBody('')
       setComposeAttachments([])
       setShowCcBcc(false)
-      
+      setEditingDraftId(null)
+
       alert('Email sent successfully!')
       await refreshFolder()
       
@@ -946,6 +1036,11 @@ export default function Dashboard() {
             <Button variant="outline-secondary" size="sm" className="ms-1" onClick={() => { /* forward mock */ }}>
               <FaForward />
             </Button>
+            {((selectedFolder === 'drafts') || (selectedEmail.tags && selectedEmail.tags.some((tag: any) => tag.id === 'DRAFT'))) && (
+              <Button variant="outline-primary" size="sm" className="ms-1" onClick={() => handleEditDraft(selectedEmail)} title="Edit Draft">
+                <BiEdit />
+              </Button>
+            )}
           </div>
           <div className="ms-auto d-flex align-items-center">
             <Button
@@ -969,12 +1064,12 @@ export default function Dashboard() {
         <Card.Body className="d-flex flex-column" style={{ overflowY: 'auto' }}>
           <Card.Title>{selectedEmail.subject}</Card.Title>
           <Card.Subtitle className="mb-2 text-muted">
-            <div><strong>From:</strong> {selectedEmail.sender}</div>
+            <div><strong>From:</strong> {typeof selectedEmail.sender === 'string' ? selectedEmail.sender : (selectedEmail.sender?.name || selectedEmail.sender?.email || 'Unknown')}</div>
             {selectedEmail.to && selectedEmail.to.length > 0 && (
-              <div><strong>To:</strong> {selectedEmail.to.map((t: any) => t.name || t.email).join(', ')}</div>
+              <div><strong>To:</strong> {selectedEmail.to.map((t: any) => typeof t === 'string' ? t : (t.name || t.email)).join(', ')}</div>
             )}
             {selectedEmail.cc && selectedEmail.cc.length > 0 && (
-              <div><strong>Cc:</strong> {selectedEmail.cc.map((c: any) => c.name || c.email).join(', ')}</div>
+              <div><strong>Cc:</strong> {selectedEmail.cc.map((c: any) => typeof c === 'string' ? c : (c.name || c.email)).join(', ')}</div>
             )}
           </Card.Subtitle>
           <hr />
@@ -1115,11 +1210,15 @@ export default function Dashboard() {
                         {String(f.id).toLowerCase() === 'starred' && <FaStar className="me-2" />}
                         {String(f.id).toLowerCase() === 'sent' && <FaPaperPlane className="me-2" />}
                         {String(f.id).toLowerCase() === 'draft' && <FaPen className="me-2" />}
+                        {String(f.id).toLowerCase() === 'spam' && <FaBan className="me-2" />}
+                        {String(f.id).toLowerCase() === 'important' && <FaExclamationTriangle className="me-2" />}
                         {String(f.id).toLowerCase() === 'archive' && <FaFileArchive className="me-2" />}
                         {String(f.id).toLowerCase() === 'trash' && <FaTrash className="me-2" />}
                         {(String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do') && <FaTasks className="me-2" />}
                         {(String(f.id).toLowerCase() === 'snoozed' || String(f.name || '').toLowerCase() === 'snoozed') && <FaClock className="me-2" />}
                         {String(f.id).toLowerCase() === 'done' && <FaCheckSquare className="me-2" />}
+                        {(!['inbox', 'starred', 'sent', 'draft', 'spam', 'important', 'archive', 'trash', 'todo', 'snoozed', 'done'].includes(String(f.id).toLowerCase()) &&
+                          !['to do', 'snoozed'].includes(String(f.name || '').toLowerCase())) && <FaFolder className="me-2" />}
                         {String(f.id).toLowerCase() === 'todo' || String(f.name || '').toLowerCase() === 'to do'
                           ? 'Todo'
                           : f.name}
@@ -1258,16 +1357,16 @@ export default function Dashboard() {
               {error && <div className="alert alert-danger p-2 mb-2">{error}</div>}
             </div>
 
-            <div 
-              className="email-list" 
-              ref={listRef} 
+            <div
+              className="email-list"
+              ref={listRef}
               onScroll={handleScroll}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseLeave}
             >
-              {loading ? (
+              {loadingFolders.has(selectedFolder) ? (
                 <div className="text-center p-5">
                   <FaSync className="fa-spin" size={32} />
                   <p className="mt-3">Loading emails...</p>
@@ -1286,7 +1385,9 @@ export default function Dashboard() {
                     {displayList.map((email: any, idx: number) => {
                       const id = email.id
                       const isRead = ('read' in email) ? !!email.read : (email.unread === false)
-                      const sender = (email.sender && (email.sender.name || email.sender.email)) ? (email.sender.name || email.sender.email) : (email.sender || '')
+                      const sender = typeof email.sender === 'string'
+                        ? email.sender
+                        : (email.sender?.name || email.sender?.email || 'Unknown')
                       const subject = email.subject || ''
                       const preview = email.body || email.preview || ''
                       const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
@@ -1434,7 +1535,7 @@ export default function Dashboard() {
           <Form>
             <Form.Group className="mb-2">
               <Form.Label>To</Form.Label>
-              <Form.Control value={replyTo} onChange={(e) => setReplyTo(e.target.value)} readOnly />
+              <Form.Control value={replyTo} readOnly />
             </Form.Group>
             <Form.Group className="mb-2">
               <Form.Label>Subject</Form.Label>

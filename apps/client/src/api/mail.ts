@@ -149,17 +149,39 @@ const mailApi = {
     formData.append('body', payload.body)
     if (payload.cc) formData.append('cc', payload.cc)
     if (payload.bcc) formData.append('bcc', payload.bcc)
-    
+
     // Add attachments if provided
     if (payload.attachments && payload.attachments.length > 0) {
       payload.attachments.forEach((file) => {
         formData.append('attachments', file)
       })
     }
-    
-    // Lưu ý: Mock API có thể chưa có endpoint drafts, fallback về mail thật nếu cần
-    // Nhưng tạm thời để mock cho đồng bộ
+
     const res = await api.post(`${BASE_ENDPOINT}/drafts`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return res.data?.data || res.data
+  },
+
+  async updateDraft(draftId: string, payload: SendEmailPayload) {
+    // Backend expects FormData, not JSON
+    const formData = new FormData()
+    formData.append('to', payload.to)
+    formData.append('subject', payload.subject)
+    formData.append('body', payload.body)
+    if (payload.cc) formData.append('cc', payload.cc)
+    if (payload.bcc) formData.append('bcc', payload.bcc)
+
+    // Add attachments if provided
+    if (payload.attachments && payload.attachments.length > 0) {
+      payload.attachments.forEach((file) => {
+        formData.append('attachments', file)
+      })
+    }
+
+    const res = await api.put(`${BASE_ENDPOINT}/drafts/${draftId}`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }

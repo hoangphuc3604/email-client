@@ -492,13 +492,37 @@ class MailService:
       return await self._get_mailboxes_fallback(user_id)
 
   async def _get_mailboxes_fallback(self, user_id: str):
-    """Fallback implementation using Gmail API."""
+    """Fallback implementation using Gmail API - only sync important labels."""
     service = await self.get_gmail_service(user_id)
     results = service.users().labels().list(userId='me').execute()
-    labels = results.get('labels', [])
+    all_labels = results.get('labels', [])
 
-    # Sync labels to DB in background
-    for label in labels:
+    # Only sync and return important labels
+    IMPORTANT_SYSTEM_LABELS = {'INBOX', 'SENT', 'DRAFT', 'TRASH', 'SPAM', 'STARRED', 'IMPORTANT'}
+    IMPORTANT_CUSTOM_NAMES = {'snoozed', 'to do', 'done'}
+
+    def is_important_label(label):
+      label_id = label.get('id', '').upper()
+      label_name = label.get('name', '').lower().strip()
+
+      # System labels
+      if label_id in IMPORTANT_SYSTEM_LABELS:
+        return True
+
+      # Custom labels by name
+      if label_name in IMPORTANT_CUSTOM_NAMES:
+        return True
+
+      # Custom labels starting with Label_ (our generated ones)
+      if label_id.startswith('LABEL_'):
+        return True
+
+      return False
+
+    important_labels = [label for label in all_labels if is_important_label(label)]
+
+    # Sync only important labels to DB
+    for label in important_labels:
       await self.labels_collection.update_one(
         {"user_id": user_id, "label_id": label['id']},
         {
@@ -522,8 +546,151 @@ class MailService:
         "unread_count": label.get("messagesUnread", 0),
         "total_count": label.get("messagesTotal", 0)
       }
-      for label in labels
+      for label in important_labels
     ]
+
+  async def _get_drafts_from_gmail(self, user_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
+    """Get drafts directly from Gmail API (no DB storage)"""
+    service = await self.get_gmail_service(user_id)
+
+    try:
+      drafts_result = service.users().drafts().list(
+        userId='me',
+        maxResults=limit,
+        pageToken=page_token
+      ).execute()
+    except Exception as e:
+      logger.error(f"Error fetching drafts from Gmail: {e}")
+      return {"threads": [], "next_page_token": None, "result_size_estimate": 0}
+
+    drafts = drafts_result.get('drafts', [])
+    next_page_token = drafts_result.get('nextPageToken')
+    result_size_estimate = drafts_result.get('resultSizeEstimate', 0)
+
+    thread_list = []
+
+    for draft_item in drafts:
+      try:
+        draft_id = draft_item['id']
+        draft_detail = service.users().drafts().get(userId='me', id=draft_id).execute()
+        message = draft_detail.get('message', {})
+
+        payload = message.get('payload', {})
+        headers = payload.get('headers', [])
+
+        def get_header(name):
+          return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
+
+        subject = get_header('Subject') or '(no subject)'
+
+        from_header = get_header('From')
+        sender_obj = {"name": "", "email": ""}
+        if from_header:
+          name, email_addr = email.utils.parseaddr(from_header)
+          sender_obj = {"name": name, "email": email_addr}
+
+        to_header = get_header('To')
+        to_list = []
+        if to_header:
+          to_list = [{"name": n, "email": e} for n, e in email.utils.getaddresses([to_header])]
+
+        internal_date = message.get('internalDate')
+        received_on = datetime.fromtimestamp(int(internal_date)/1000).isoformat() if internal_date else datetime.utcnow().isoformat()
+
+        body_text = ""
+        body_html = ""
+
+        def parse_parts(parts):
+          nonlocal body_text, body_html
+          for part in parts:
+            mime_type = part.get('mimeType')
+            body = part.get('body', {})
+            data = body.get('data')
+
+            if mime_type == 'text/plain' and data:
+              body_text += base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            elif mime_type == 'text/html' and data:
+              body_html += base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            elif part.get('parts'):
+              parse_parts(part.get('parts'))
+
+        if 'parts' in payload:
+          parse_parts(payload['parts'])
+        else:
+          data = payload.get('body', {}).get('data')
+          mime_type = payload.get('mimeType')
+          if data:
+            decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            if mime_type == 'text/html':
+              body_html = decoded
+            else:
+              body_text = decoded
+
+        processed_html = body_html or f"<pre>{body_text}</pre>"
+        preview_body = body_text or body_html
+        summary_text = None
+        if summarize and preview_body:
+          try:
+            summary_text = await self._get_summarizer().summarize(preview_body)
+          except Exception as e:
+            logger.warning(f"Summarize draft failed for {draft_id}: {e}")
+
+        has_attachments = self._has_attachments(payload)
+
+        thread_list.append({
+          "id": message['id'],
+          "history_id": message.get('historyId'),
+          "subject": subject,
+          "sender": sender_obj,
+          "to": to_list,
+          "received_on": received_on,
+          "unread": False,  # Drafts are never unread
+          "tags": [{"id": "DRAFT", "name": "DRAFT"}],
+          "body": preview_body,
+          "summary": summary_text,
+          "has_attachments": has_attachments
+        })
+      except Exception as e:
+        logger.error(f"Error processing draft {draft_item.get('id')}: {e}")
+        continue
+
+    return {
+      "threads": thread_list,
+      "next_page_token": next_page_token,
+      "result_size_estimate": result_size_estimate
+    }
+
+  async def _get_draft_detail_from_gmail(self, user_id: str, draft_id: str, summarize: bool = False):
+    """Get draft detail directly from Gmail API"""
+    service = await self.get_gmail_service(user_id)
+
+    try:
+      draft_detail = service.users().drafts().get(userId='me', id=draft_id).execute()
+      message = draft_detail.get('message', {})
+
+      parsed = self._parse_gmail_message(message)
+
+      # Override some fields for draft
+      parsed.id = message.get('id')
+      parsed.thread_id = message.get('threadId', message.get('id'))
+
+      if summarize and parsed.body:
+        try:
+          parsed.summary = await self._get_summarizer().summarize(parsed.body)
+        except Exception as e:
+          logger.warning(f"Summarize draft detail failed for {draft_id}: {e}")
+
+      return {
+        "messages": [parsed],
+        "latest": parsed,
+        "has_unread": False,  # Drafts are never unread
+        "total_replies": 0,   # Drafts don't have replies
+        "labels": [{"id": "DRAFT", "name": "DRAFT"}],
+        "is_latest_draft": True
+      }
+    except Exception as e:
+      logger.error(f"Error getting draft detail {draft_id}: {e}")
+      raise ValueError(f"Draft not found: {draft_id}")
 
   async def get_all_labels(self, user_id: str):
     service = await self.get_gmail_service(user_id)
@@ -576,7 +743,11 @@ class MailService:
     return bool(payload.get('filename'))
 
   async def get_emails(self, user_id: str, mailbox_id: str, page_token: str = None, limit: int = 50, summarize: bool = False):
-    """Get emails from DB first, fallback to Gmail API if needed."""
+    """Get emails from DB first, fallback to Gmail API if needed. Drafts use Gmail API only."""
+    # Special handling for drafts - use Gmail API directly
+    if mailbox_id.lower() == 'drafts':
+      return await self._get_drafts_from_gmail(user_id, page_token, limit, summarize)
+
     try:
       # Check if this is a kanban label (stored in DB labels collection)
       db_label = await self.labels_collection.find_one({
@@ -777,20 +948,27 @@ class MailService:
     }
 
   async def get_email_detail(self, user_id: str, email_id: str, summarize: bool = False) -> ThreadDetailResponse:
-    """Get email thread detail from DB first, fallback to Gmail API if needed."""
+    """Get email thread detail from DB first, fallback to Gmail API if needed. Drafts use Gmail API only."""
     try:
       # First try to find the message in DB
       email_doc = await self.emails_collection.find_one({"user_id": user_id, "message_id": email_id})
       if email_doc:
+        # Check if this is a draft stored in DB (shouldn't happen with new logic, but handle anyway)
+        if 'DRAFT' in email_doc.get('labels', []):
+          return await self._get_draft_detail_from_gmail(user_id, email_id, summarize)
         thread_id = email_doc["thread_id"]
       else:
-        # Fallback: get thread_id from Gmail API
-        service = await self.get_gmail_service(user_id)
+        # Not in DB - try as draft first, then regular message
         try:
-            msg_metadata = service.users().messages().get(userId='me', id=email_id, format='minimal').execute()
-            thread_id = msg_metadata.get('threadId')
+          return await self._get_draft_detail_from_gmail(user_id, email_id, summarize)
         except Exception:
-            raise ValueError("Message not found")
+          # Not a draft, try regular message
+          service = await self.get_gmail_service(user_id)
+          try:
+              msg_metadata = service.users().messages().get(userId='me', id=email_id, format='minimal').execute()
+              thread_id = msg_metadata.get('threadId')
+          except Exception:
+              raise ValueError("Message not found")
 
       # Query all messages in the thread from DB
       thread_docs = await self.emails_collection.find(
@@ -1141,13 +1319,14 @@ class MailService:
           raise ValueError(f"Failed to reply to email: {str(e)}")
 
   async def create_draft(self, user_id: str, draft_data: dict, attachments: list = None):
+      """Create draft using Gmail API only (no DB storage)"""
       from googleapiclient.errors import HttpError
-      
+
       if not draft_data.get('to'):
           raise ValueError("Recipient email address is required")
-      
+
       service = await self.get_gmail_service(user_id)
-      
+
       try:
           message = MIMEMultipart()
           message['to'] = draft_data.get('to')
@@ -1156,11 +1335,11 @@ class MailService:
               message['cc'] = draft_data.get('cc')
           if draft_data.get('bcc'):
               message['bcc'] = draft_data.get('bcc')
-              
+
           body = draft_data.get('body', '')
           msg = MIMEText(body, 'html')
           message.attach(msg)
-          
+
           if attachments:
               for attachment in attachments:
                   try:
@@ -1169,7 +1348,7 @@ class MailService:
                           part = MIMEBase(mime_type_parts[0], mime_type_parts[1])
                       else:
                           part = MIMEBase('application', 'octet-stream')
-                      
+
                       part.set_payload(attachment['content'])
                       encoders.encode_base64(part)
                       part.add_header(
@@ -1179,14 +1358,14 @@ class MailService:
                       message.attach(part)
                   except Exception as e:
                       raise ValueError(f"Failed to attach file '{attachment.get('filename', 'unknown')}': {str(e)}")
-          
+
           raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
           draft_body = {
               'message': {
                   'raw': raw
               }
           }
-          
+
           draft = service.users().drafts().create(userId='me', body=draft_body).execute()
           return draft
       except HttpError as e:
@@ -1202,6 +1381,76 @@ class MailService:
           raise
       except Exception as e:
           raise ValueError(f"Failed to create draft: {str(e)}")
+
+  async def update_draft(self, user_id: str, draft_id: str, draft_data: dict, attachments: list = None):
+      """Update existing draft using Gmail API only"""
+      from googleapiclient.errors import HttpError
+
+      if not draft_data.get('to'):
+          raise ValueError("Recipient email address is required")
+
+      service = await self.get_gmail_service(user_id)
+
+      try:
+          message = MIMEMultipart()
+          message['to'] = draft_data.get('to')
+          message['subject'] = draft_data.get('subject', '(no subject)')
+          if draft_data.get('cc'):
+              message['cc'] = draft_data.get('cc')
+          if draft_data.get('bcc'):
+              message['bcc'] = draft_data.get('bcc')
+
+          body = draft_data.get('body', '')
+          msg = MIMEText(body, 'html')
+          message.attach(msg)
+
+          if attachments:
+              for attachment in attachments:
+                  try:
+                      mime_type_parts = attachment['mime_type'].split('/', 1)
+                      if len(mime_type_parts) == 2:
+                          part = MIMEBase(mime_type_parts[0], mime_type_parts[1])
+                      else:
+                          part = MIMEBase('application', 'octet-stream')
+
+                      part.set_payload(attachment['content'])
+                      encoders.encode_base64(part)
+                      part.add_header(
+                          'Content-Disposition',
+                          f'attachment; filename="{attachment["filename"]}"'
+                      )
+                      message.attach(part)
+                  except Exception as e:
+                      raise ValueError(f"Failed to attach file '{attachment.get('filename', 'unknown')}': {str(e)}")
+
+          raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+          draft_body = {
+              'message': {
+                  'raw': raw
+              }
+          }
+
+          draft = service.users().drafts().update(
+              userId='me',
+              id=draft_id,
+              body=draft_body
+          ).execute()
+          return draft
+      except HttpError as e:
+          if e.resp.status == 401:
+              raise ValueError("Authentication failed. Please refresh your Google credentials.")
+          elif e.resp.status == 403:
+              raise ValueError("Access denied. Insufficient permissions to update draft.")
+          elif e.resp.status == 400:
+              raise ValueError(f"Invalid draft format: {str(e)}")
+          elif e.resp.status == 404:
+              raise ValueError(f"Draft {draft_id} not found")
+          else:
+              raise ValueError(f"Gmail API error: {str(e)}")
+      except ValueError:
+          raise
+      except Exception as e:
+          raise ValueError(f"Failed to update draft: {str(e)}")
 
   async def modify_email(self, user_id: str, email_id: str, updates: dict):
       """Modify email properties in DB only (DB-first approach)."""
@@ -1239,6 +1488,21 @@ class MailService:
 
       # Handle trash
       if updates.get('trash'):
+          # Check if this is a draft (try Gmail API first)
+          service = await self.get_gmail_service(user_id)
+          try:
+              # Try to delete as draft first
+              service.users().drafts().delete(userId='me', id=email_id).execute()
+              logger.info(f"[MODIFY EMAIL] Deleted draft {email_id} from Gmail API")
+              # If draft existed in DB, remove it
+              if email_doc:
+                  await self.emails_collection.delete_one({"user_id": user_id, "message_id": email_id})
+              return {"message": "Draft deleted successfully"}
+          except Exception:
+              # Not a draft, handle as regular email
+              pass
+
+          # Regular emails: add TRASH label
           if 'TRASH' not in new_labels:
               new_labels.append('TRASH')
           # Remove INBOX when moving to trash
