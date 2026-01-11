@@ -178,6 +178,10 @@ async def run_embedding_job():
         await client.close()
 
 
+# Global to hold background tasks references to prevent GC
+background_tasks = set()
+
+
 @app.on_event("startup")
 async def on_startup():
     # Initialize indexes and start scheduler
@@ -202,12 +206,16 @@ async def on_startup():
     sync_service = EmailSyncService(db)
 
     # Run sync loop in background
-    asyncio.create_task(sync_service.run_sync_loop())
+    sync_task = asyncio.create_task(sync_service.run_sync_loop())
+    background_tasks.add(sync_task)
+    sync_task.add_done_callback(background_tasks.discard)
     logging.info(f"[STARTUP] In-process sync loop started (interval: {settings.MAIL_SYNC_INTERVAL_SECONDS}s)")
 
     # Run backlog processing loop in background (if enabled)
     if settings.MAIL_SYNC_BACKLOG_ENABLED:
-        asyncio.create_task(sync_service.run_backlog_loop())
+        backlog_task = asyncio.create_task(sync_service.run_backlog_loop())
+        background_tasks.add(backlog_task)
+        backlog_task.add_done_callback(background_tasks.discard)
         logging.info(f"[STARTUP] Backlog processing loop started (interval: {settings.MAIL_SYNC_BACKLOG_INTERVAL_SECONDS}s)")
 
     # Legacy scheduler jobs
