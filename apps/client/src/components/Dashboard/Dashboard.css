@@ -394,3 +394,22 @@ div[style*="overflowX: 'auto'"]::-webkit-scrollbar-thumb:hover,
 div[style*="overflow: auto"]::-webkit-scrollbar-thumb:hover {
   background: rgba(199, 112, 240, 0.8);
 }
+
+/* --- CẬP NHẬT GIAO DIỆN THEO YÊU CẦU MỚI (SENDER) --- */
+
+/* 1. Cố định Ngôi sao luôn là màu TRẮNG (bất kể trạng thái đọc/chưa đọc) */
+.email-list .star-col {
+  color: #ffffff !important;
+}
+
+/* 2. Mặc định (ĐÃ ĐỌC): Tên người gửi (Sender) là màu TRẮNG */
+.email-list .sender {
+  color: #ffffff !important;
+  font-weight: normal;
+}
+
+/* 3. Trạng thái CHƯA ĐỌC (.unread): Tên người gửi (Sender) chuyển sang màu XANH */
+.email-list .list-group-item.unread .sender {
+  color: #0b3af4 !important; /* Màu xanh dương neon nổi bật */
+  font-weight: bold;         /* In đậm để nhấn mạnh thư mới */
+}
