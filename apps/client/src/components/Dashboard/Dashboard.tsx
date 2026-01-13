@@ -1455,9 +1455,15 @@ export default function Dashboard() {
                       const preview = email.body || email.preview || ''
                       const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
                       const rawLabels = email.labels || email.tags || [];
-                      const isStarred = rawLabels.includes('starred') || 
-                                        rawLabels.includes('STARRED') || 
-                                        rawLabels.some((t: any) => t.id === 'STARRED' || t.name === 'STARRED');
+                      const isStarred = 
+                        // Case 1: Array of strings (['STARRED', 'INBOX'])
+                        (Array.isArray(rawLabels) && rawLabels.some((l: any) => 
+                            typeof l === 'string' && (l === 'starred' || l === 'STARRED')
+                        )) ||
+                        // Case 2: Array of objects ([{id: 'STARRED', ...}])
+                        (Array.isArray(rawLabels) && rawLabels.some((t: any) => 
+                            typeof t === 'object' && (t.id === 'STARRED' || t.name === 'STARRED' || t.id === 'starred')
+                        ));
                       return (
                         <ListGroup.Item
                           id={`email-row-${id}`}
@@ -1477,11 +1483,11 @@ export default function Dashboard() {
                           </div>
                           <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
                             {isStarred ? (
-                              <FaStar className="starred-active" size={16} /> 
+                                <FaStar className="starred-active" size={16} /> 
                             ) : (
-                              <FaRegStar size={16} />
+                                <FaRegStar size={16} />
                             )}
-                          </div>
+                            </div>
                           <div className="meta-col flex-fill">
                             <div className="row-top d-flex justify-content-between">
                               <div className="sender">{sender}</div>

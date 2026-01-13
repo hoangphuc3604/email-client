@@ -280,6 +280,13 @@ class MailService:
     results = []
     for doc in docs:
       labels = doc.get("labels", [])
+      
+      # --- [START CHANGE] ---
+      # Chuyển đổi labels string sang tags object cho search
+      # Đảm bảo STARRED luôn được bao gồm nếu nó có trong labels
+      tags = [{"id": l, "name": l} for l in labels]
+      # --- [END CHANGE] ---
+
       results.append({
         "id": doc.get("message_id"),
         "history_id": doc.get("history_id"),
@@ -291,7 +298,7 @@ class MailService:
         "to": doc.get("to", []),
         "received_on": doc.get("received_on") or "",
         "unread": doc.get("unread", False),
-        "tags": [{"id": l, "name": l} for l in labels],
+        "tags": tags, # Sử dụng tags đã convert
         "body": doc.get("snippet", "")[:150],
         "has_attachments": doc.get("has_attachments", False)
       })
@@ -792,6 +799,20 @@ class MailService:
           except Exception as e:
             logger.warning(f"Summarize failed for {doc.get('message_id')}: {e}")
 
+        # --- [START CHANGE] ---
+        # Logic đồng nhất: Nếu trong labels (hệ thống) có STARRED, 
+        # hãy đảm bảo nó xuất hiện trong tags gửi về frontend
+        display_tags = doc.get("tags", [])
+        system_labels = doc.get("labels", [])
+        
+        # Kiểm tra xem đã có tag STARRED trong display_tags chưa
+        has_star_tag = any(t.get('id') == 'STARRED' for t in display_tags if isinstance(t, dict))
+        
+        if "STARRED" in system_labels and not has_star_tag:
+             # Nếu chưa có tag nhưng có label hệ thống, thêm vào để Frontend hiển thị màu xanh
+             display_tags.append({"id": "STARRED", "name": "STARRED"})
+        # --- [END CHANGE] ---
+
         thread_list.append({
           "id": doc["message_id"],
           "history_id": doc.get("history_id"),
@@ -803,7 +824,7 @@ class MailService:
           "to": doc.get("to", []),
           "received_on": doc.get("received_on", ""),
           "unread": doc.get("unread", False),
-          "tags": doc.get("tags", []),
+          "tags": display_tags, # Sử dụng biến đã xử lý
           "body": doc.get("snippet", ""),
           "summary": summary_text,
           "has_attachments": doc.get("has_attachments", False)
