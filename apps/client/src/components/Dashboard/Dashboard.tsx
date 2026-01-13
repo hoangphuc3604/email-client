@@ -301,7 +301,33 @@ export default function Dashboard() {
     try {
       const pageToken = isInitial ? null : pageTokenMap[folderId]
       const res = await mailApi.listEmails(folderId, INITIAL_LOAD_COUNT, pageToken || undefined)
-      const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+      // Lấy danh sách email từ response
+      let previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+      
+      // --- [ĐOẠN CODE MỚI] ---
+      // Nếu đang tải folder 'starred', kiểm tra và đảm bảo mọi email đều có tag STARRED
+      if (folderId === 'starred') {
+        previews = previews.map((email: any) => {
+          const rawTags = email.tags || email.labels || [];
+          
+          // Kiểm tra xem đã có tag star chưa (xử lý cả string và object)
+          const hasStar = Array.isArray(rawTags) && rawTags.some((t: any) => 
+            (typeof t === 'string' && (t === 'STARRED' || t === 'starred')) || 
+            (typeof t === 'object' && (t.id === 'STARRED' || t.name === 'STARRED'))
+          );
+
+          // Nếu chưa có, tự động thêm vào để UI hiển thị đúng (Ngôi sao đặc màu xanh)
+          if (!hasStar) {
+             const starTag = { id: 'STARRED', name: 'STARRED' };
+             // Cập nhật cả tags và labels để an toàn
+             const newTags = [...(Array.isArray(rawTags) ? rawTags : []), starTag];
+             return { ...email, tags: newTags, labels: newTags };
+          }
+          return email;
+        });
+      }
+      // -----------------------
+
       const nextPageToken = res?.next_page_token || res?.nextPageToken
       
       setPreviewsMap((prev) => ({
