@@ -737,25 +737,62 @@ export default function Dashboard() {
     setSelectedIds({})
   }
   
+  // Tìm hàm toggleStar cũ và thay thế bằng hàm này
   async function toggleStar(email: any) {
-    const hasStar = (email.labels || []).includes('starred') || (email.labels || []).includes('STARRED')
-    
+    // Kiểm tra trạng thái hiện tại
+    // Lưu ý: Backend trả về labels/tags có thể là string[] hoặc object[], cần check kỹ
+    const currentLabels = email.labels || email.tags || [];
+    const isStarred = currentLabels.includes('starred') || 
+                      currentLabels.includes('STARRED') || 
+                      currentLabels.some((t: any) => t.id === 'STARRED' || t.name === 'STARRED');
+
+    // 1. OPTIMISTIC UPDATE: Cập nhật giao diện NGAY LẬP TỨC
+    setPreviewsMap((prev) => {
+      const updated = { ...prev };
+      
+      // Chạy qua tất cả các folder đang load để tìm email này và update trạng thái
+      Object.keys(updated).forEach(folder => {
+        updated[folder] = updated[folder].map((e: any) => {
+          if (e.id === email.id) {
+            let newLabels = e.labels || e.tags || [];
+            
+            // Nếu là mảng object (từ backend search/detail), chuyển về dạng đơn giản để xử lý UI
+            if (isStarred) {
+              // Đang Star -> Bỏ Star (Unstar)
+              if (Array.isArray(newLabels)) {
+                 newLabels = newLabels.filter((l: any) => {
+                    const val = typeof l === 'string' ? l : (l.id || l.name);
+                    return val !== 'starred' && val !== 'STARRED';
+                 });
+              }
+            } else {
+              // Chưa Star -> Thêm Star
+              // Thêm string 'starred' vào để logic hiển thị bên dưới bắt được
+              newLabels = [...newLabels, 'starred']; 
+            }
+            
+            // Trả về email với labels mới
+            return { ...e, labels: newLabels, tags: newLabels };
+          }
+          return e;
+        });
+      });
+      return updated;
+    });
+
+    // 2. Gọi API để đồng bộ với Server và Gmail thật
     try {
-      await mailApi.modifyEmail(email.id, { starred: !hasStar })
-      if (selectedFolder !== 'search_results') {
-          await refreshFolder()
-      } else {
-          // Nếu đang ở search results, cập nhật state local
-          setPreviewsMap((prev) => ({
-             ...prev,
-             search_results: (prev['search_results'] || []).map(e => 
-                 e.id === email.id ? { ...e, labels: hasStar ? [] : ['starred'] } : e // Simplification
-             )
-          }));
+      await mailApi.modifyEmail(email.id, { starred: !isStarred });
+      
+      // Nếu folder hiện tại là 'starred' và ta vừa bỏ star, thì mới cần load lại để nó biến mất
+      if (selectedFolder === 'starred' && isStarred) {
+         // Đợi một chút cho hiệu ứng click xong rồi mới refresh
+         setTimeout(() => refreshFolder(), 300);
       }
     } catch (e) {
-      console.error('Failed to toggle star on backend:', e)
-      alert('Failed to update star status')
+      console.error('Failed to toggle star on backend:', e);
+      // Nếu lỗi thì có thể revert lại state (tùy chọn), nhưng thường user sẽ thử lại
+      alert('Failed to update star status');
     }
   }
   
@@ -1391,7 +1428,10 @@ export default function Dashboard() {
                       const subject = email.subject || ''
                       const preview = email.body || email.preview || ''
                       const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
-                      const isStarred = ((email.labels || email.tags) || []).includes('starred')
+                      const rawLabels = email.labels || email.tags || [];
+                      const isStarred = rawLabels.includes('starred') || 
+                                        rawLabels.includes('STARRED') || 
+                                        rawLabels.some((t: any) => t.id === 'STARRED' || t.name === 'STARRED');
                       return (
                         <ListGroup.Item
                           id={`email-row-${id}`}
@@ -1410,7 +1450,11 @@ export default function Dashboard() {
                             <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
                           </div>
                           <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
-                            {isStarred ? <FaStar /> : <FaRegStar />}
+                            {isStarred ? (
+                              <FaStar className="starred-active" size={16} /> 
+                            ) : (
+                              <FaRegStar size={16} />
+                            )}
                           </div>
                           <div className="meta-col flex-fill">
                             <div className="row-top d-flex justify-content-between">

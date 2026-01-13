@@ -413,3 +413,20 @@ div[style*="overflow: auto"]::-webkit-scrollbar-thumb:hover {
   color: #0b3af4 !important; /* Màu xanh dương neon nổi bật */
   font-weight: bold;         /* In đậm để nhấn mạnh thư mới */
 }
+/* 1. Cố định Ngôi sao luôn là màu TRẮNG (bất kể trạng thái đọc/chưa đọc) */
+.email-list .star-col {
+  color: #ffffff !important;
+}
+
+/* --- VÀ THAY THẾ BẰNG ĐOẠN NÀY --- */
+/* 1. Cố định Ngôi sao mặc định (chưa star) là màu TRẮNG */
+.email-list .star-col {
+  color: #ffffff;
+  cursor: pointer;
+}
+
+/* Class mới dành cho ngôi sao đã kích hoạt (màu xanh dương) */
+.email-list .star-col .starred-active {
+  color: #0b3af4 !important; /* Màu xanh dương neon */
+  filter: drop-shadow(0 0 2px #0b3af4); /* Thêm chút hiệu ứng phát sáng nếu thích */
+}
