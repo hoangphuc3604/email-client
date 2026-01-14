@@ -32,3 +32,6 @@ chroma_data/
 .DS_Store
 Thumbs.db
 
+tools/
+*.json
+

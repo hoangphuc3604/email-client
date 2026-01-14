@@ -82,6 +82,19 @@ class QdrantVectorStore:
                 match=qm.MatchValue(value=user_id),
             )
         ]
+
+        # Filter out draft and trash emails for better semantic search
+        must_not = [
+            qm.FieldCondition(
+                key="labels",
+                match=qm.MatchAny(any=["DRAFT"]),
+            ),
+            qm.FieldCondition(
+                key="labels",
+                match=qm.MatchAny(any=["TRASH"]),
+            )
+        ]
+
         if mailbox_label_id:
             must.append(
                 qm.FieldCondition(
@@ -96,7 +109,7 @@ class QdrantVectorStore:
             limit=top_k,
             with_payload=True,
             with_vectors=False,
-            query_filter=qm.Filter(must=must),
+            query_filter=qm.Filter(must=must, must_not=must_not),
         )
         scored: List[Tuple[str, float, Dict]] = []
         for point in res.points:

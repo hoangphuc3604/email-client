@@ -41,7 +41,8 @@ import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 import { BsKanban, BsListUl } from 'react-icons/bs'; 
 import { AiOutlineClose } from 'react-icons/ai'; // [Cập nhật] Icon đóng
 import KanbanBoard from './KanbanBoard'; 
-import { useSearchParams } from 'react-router-dom'; // [Cập nhật] Hook lấy query param
+import { useSearchParams } from 'react-router-dom';
+import { useSearch } from '../../contexts/SearchContext'; // [Cập nhật] Hook lấy query param
 
 // Map Gmail label IDs to friendly names
 const LABEL_NAME_MAP: Record<string, string> = {
@@ -67,7 +68,6 @@ function timeAgo(ts: number) {
 
 export default function Dashboard() {
   const [selectedFolder, setSelectedFolder] = useState('inbox')
-  const [selectedEmail, setSelectedEmail] = useState<any | null>(null)
   const [mailboxes, setMailboxes] = useState<any[]>([])
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [previewsMap, setPreviewsMap] = useState<Record<string, any[]>>(() => {
@@ -105,8 +105,9 @@ export default function Dashboard() {
   const [autoSyncAttempted, setAutoSyncAttempted] = useState(false); // Track if auto-sync was attempted
   
   // [Cập nhật] Hook xử lý search query
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const searchQuery = searchParams.get('q');
+  const { selectedEmail, setSelectedEmail } = useSearch();
 
   useEffect(() => {
     try {
@@ -116,100 +117,13 @@ export default function Dashboard() {
     }
   }, [previewsMap])
 
-  // [Cập nhật] Logic xử lý khi có search query
-  useEffect(() => {
-    if (searchQuery) {
-      handleSearch(searchQuery);
-    }
-  }, [searchQuery]);
+
 
   // [Cập nhật] Hàm thực hiện tìm kiếm
-  async function handleSearch(query: string, skipAutoSync: boolean = false) {
-    setLoading(true);
-    setError(null); // Reset lỗi cũ
-    try {
-      console.log('[Search] Calling API with query:', query);
-      console.log('[Search] Attempting Semantic Search with query:', query);
-      
-      // 1. Ưu tiên gọi Semantic Search (Tìm kiếm thông minh)
-      let results = await mailApi.searchEmailsSemantic(query);
-      
-      // 2. [QUAN TRỌNG] Logic Fallback: 
-      // Nếu Semantic Search không trả về kết quả nào, ta gọi lại Search cũ (Keyword Search)
-      if (!results || (Array.isArray(results) && results.length === 0)) {
-          console.log('[Search] Semantic search returned 0 results. Falling back to Standard Keyword Search...');
-          results = await mailApi.searchEmails(query);
-      }
-
-      console.log('[Search] Final results:', results);
-      console.log('[Search] Raw API response:', results);
-      console.log('[Search] Is array?', Array.isArray(results));
-      console.log('[Search] Length:', results?.length);
-      
-      // Normalize search results to match preview format
-      const normalizedResults = Array.isArray(results) ? results.map((email: any) => ({
-        ...email,
-        // Convert received_on to timestamp if needed
-        timestamp: email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : (email.received_on ? Date.parse(email.received_on) : Date.now())),
-        // Ensure hasAttachments field exists
-        hasAttachments: email.hasAttachments || email.has_attachments || false,
-        // Normalize preview/body field
-        preview: email.preview || email.body || email.snippet || '',
-      })) : [];
-      
-      console.log('[Search] Normalized results count:', normalizedResults.length);
-      console.log('[Search] Normalized results:', normalizedResults);
-      
-      setPreviewsMap((prev) => ({
-        ...prev,
-        'search_results': normalizedResults
-      }));
-      setSelectedFolder('search_results');
-      setSelectedEmail(null); // Clear any selected email to prevent random opening
-      // Don't force view mode - let user keep their preference
-      setMobileView('list');
-      
-      // Auto-sync if no results and haven't tried syncing yet
-      if (normalizedResults.length === 0 && !autoSyncAttempted && !skipAutoSync) {
-        console.log('[Search] No results found, attempting auto-sync...');
-        setAutoSyncAttempted(true); // Mark that we've attempted sync before starting
-        try {
-          await mailApi.syncEmailIndex(90, 5);
-          console.log('[Search] Auto-sync completed, waiting for index to be ready...');
-          // Wait a bit for MongoDB index to commit before re-searching
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          console.log('[Search] Re-searching...');
-          // Re-run search after sync, but skip auto-sync to prevent infinite loop
-          // Don't set loading to false yet - keep it true for the re-search
-          await handleSearch(query, true);
-          return; // Exit early to avoid setting loading to false
-        } catch (syncError: any) {
-          console.error('[Search] Auto-sync failed:', syncError);
-          setError(`No results found. Auto-sync failed: ${syncError.response?.data?.detail || syncError.message}`);
-        }
-      } else if (normalizedResults.length === 0) {
-        console.warn('[Search] No results found for query:', query);
-      }
-    } catch (e: any) {
-      console.error("[Search] Failed:", e);
-      console.error("[Search] Error details:", e.response?.data);
-      setError(`Failed to search emails: ${e.response?.data?.detail || e.message || 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // [Cập nhật] Hàm xóa tìm kiếm và quay về Inbox
-  function clearSearch() {
-    setSearchParams({}); // Xóa query param trên URL
-    setAutoSyncAttempted(false); // Reset auto-sync flag for next search
-    selectFolder('inbox');
-  }
 
   const displayList = useMemo(() => {
     let list = previewsMap[selectedFolder] || []
-    
-    console.log(`[displayList] folder: ${selectedFolder}, raw list:`, list); // Debug log
+
 
     // 1. FILTERING (Lọc)
     if (filterMode === 'unread') {
@@ -239,9 +153,9 @@ export default function Dashboard() {
       }
     })
 
-    console.log(`[displayList] after filter/sort:`, list); // Debug log
     return list
-  }, [previewsMap, selectedFolder, filterMode, sortMode]) // Quan trọng: Phải có dependencies này
+  }, [previewsMap, selectedFolder, filterMode, sortMode, searchQuery]) // Quan trọng: Phải có dependencies này
+
 
   useEffect(() => {
     if (loadingMore === false && scrollTopRef.current > 0 && listRef.current) {
@@ -260,10 +174,6 @@ export default function Dashboard() {
   }, [previewsMap])
 
   function selectFolder(id: string) {
-    // [Cập nhật] Xóa search params khi người dùng chuyển folder thủ công
-    if (id !== 'search_results') {
-      setSearchParams({});
-    }
 
     // Reset all states for clean folder switch
     setSelectedFolder(id)
@@ -287,7 +197,6 @@ export default function Dashboard() {
   }
 
   async function loadFolderData(folderId: string, isInitial: boolean = false) {
-    if (folderId === 'search_results') return; // Bỏ qua nếu là search results
 
     if (isInitial) {
       setLoadingFolders(prev => new Set([...prev, folderId]))
@@ -349,8 +258,6 @@ export default function Dashboard() {
   }
 
   function loadMoreEmails() {
-    // Không load more cho search results (trừ khi API search hỗ trợ phân trang)
-    if (selectedFolder === 'search_results') return;
 
     const hasMore = hasMoreMap[selectedFolder]
     if (hasMore && !loadingMore) {
@@ -488,19 +395,6 @@ export default function Dashboard() {
       const processedHtml = message.processedHtml || message.processed_html || message.body || message.decoded_body || ''
       
       // Log email HTML content for debugging
-      console.log('=== EMAIL HTML DEBUG ===')
-      console.log('Email ID:', email.id)
-      console.log('Subject:', message.subject || message.title || '(No Subject)')
-      console.log('From:', senderStr)
-      console.log('Full message object keys:', Object.keys(message))
-      console.log('Has processedHtml (camelCase):', !!message.processedHtml)
-      console.log('Has processed_html (snake_case):', !!message.processed_html)
-      console.log('Has body:', !!message.body)
-      console.log('Has decoded_body:', !!message.decoded_body)
-      console.log('Processed HTML Length:', processedHtml.length)
-      console.log('Processed HTML Content (first 500 chars):', processedHtml.substring(0, 500))
-      console.log('Full message:', message)
-      console.log('========================')
       
       setSelectedEmail({
         ...message,
@@ -742,17 +636,7 @@ export default function Dashboard() {
     
     try {
       await mailApi.modifyEmail(email.id, { starred: !hasStar })
-      if (selectedFolder !== 'search_results') {
-          await refreshFolder()
-      } else {
-          // Nếu đang ở search results, cập nhật state local
-          setPreviewsMap((prev) => ({
-             ...prev,
-             search_results: (prev['search_results'] || []).map(e => 
-                 e.id === email.id ? { ...e, labels: hasStar ? [] : ['starred'] } : e // Simplification
-             )
-          }));
-      }
+      await refreshFolder()
     } catch (e) {
       console.error('Failed to toggle star on backend:', e)
       alert('Failed to update star status')
@@ -760,10 +644,6 @@ export default function Dashboard() {
   }
   
   async function refreshFolder() {
-    if (selectedFolder === 'search_results') {
-        if (searchQuery) handleSearch(searchQuery);
-        return;
-    }
     setSelectedEmail(null)
     setSelectedIds({})
     setMobileView('list')
@@ -1256,7 +1136,7 @@ export default function Dashboard() {
                 <>
                   <div className="email-list-actions d-flex align-items-center justify-content-between mb-2">
                     <h5 className="m-0 text-white">
-                      {selectedFolder === 'search_results' ? `Search Results: "${searchQuery}"` : 'Project Board'}
+                      Project Board
                     </h5>
                     <Button 
                       variant="outline-info" 
@@ -1269,7 +1149,6 @@ export default function Dashboard() {
                   <div className="flex-grow-1" style={{ overflow: 'auto', height: '100%' }}>
                     <KanbanBoard 
                       onOpenEmail={(email) => openEmail(email)} 
-                      searchResults={selectedFolder === 'search_results' ? displayList : undefined}
                     />
                   </div>
                 </>
@@ -1279,12 +1158,6 @@ export default function Dashboard() {
             <>
           <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
              {/* [Cập nhật] Header cho trang kết quả tìm kiếm */}
-             {selectedFolder === 'search_results' && (
-                <div className="alert alert-info py-2 px-3 mb-2 d-flex justify-content-between align-items-center">
-                   <small className="text-truncate" style={{maxWidth: '200px'}}>Results for: <strong>{searchQuery}</strong></small>
-                   <Button variant="outline-info" size="sm" onClick={clearSearch}>Clear</Button>
-                </div>
-              )}
 
             <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Switch View</Tooltip>}>
@@ -1399,6 +1272,7 @@ export default function Dashboard() {
                           action
                           className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
                           onClick={(e) => {
+                            e.preventDefault()
                             if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
                               return
                             }
@@ -1418,7 +1292,7 @@ export default function Dashboard() {
                               <div className="time">{timeAgo(ts)}</div>
                             </div>
                             <div className="subject">{subject}</div>
-                            <div className="preview">{preview}</div>
+                            <div className="preview" style={{ userSelect: 'none' }}>{preview}</div>
                           </div>
                         </ListGroup.Item>
                       )

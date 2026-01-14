@@ -16,6 +16,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import ScrollToTop from "./components/ScrollToTop";
+import { SearchProvider } from "./contexts/SearchContext";
 import "./style.css";
 import "./App.css";
 import "bootstrap/dist/css/bootstrap.min.css";
@@ -32,23 +33,25 @@ function App() {
   }, []);
 
   return (
-    <Router>
-      <AuthInitializer />
-      <Preloader load={load} />
-      <div className="App" id={load ? "no-scroll" : "scroll"}>
-        <Navbar />
-        <ScrollToTop />
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard/></ProtectedRoute>} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/google-callback" element={<GoogleCallback />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="*" element={<Navigate to="/dashboard"/>} />
-        </Routes>
+    <SearchProvider>
+      <Router>
+        <AuthInitializer />
+        <Preloader load={load} />
+        <div className="App" id={load ? "no-scroll" : "scroll"}>
+          <Navbar />
+          <ScrollToTop />
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" />} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard/></ProtectedRoute>} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/google-callback" element={<GoogleCallback />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="*" element={<Navigate to="/dashboard"/>} />
+          </Routes>
         <Footer />
       </div>
     </Router>
+    </SearchProvider>
   );
 }
 

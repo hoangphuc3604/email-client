@@ -127,10 +127,19 @@ class MailService:
 
   def _build_embedding_text(self, doc: Dict[str, Any]) -> str:
     subject = doc.get("subject") or ""
-    from_name = doc.get("from_name") or ""
-    from_email = doc.get("from_email") or ""
-    snippet = doc.get("snippet") or ""
-    return f"Subject: {subject}\nFrom: {from_name} <{from_email}>\nSnippet: {snippet}"
+
+    # Prioritize content sources: body > snippet
+    email_content = ""
+    if doc.get("body") and len(doc["body"].strip()) > 50:
+      email_content = doc["body"]
+    elif doc.get("snippet"):
+      email_content = doc["snippet"]
+
+    # Combine subject and body content
+    if email_content and subject:
+      return f"{subject}\n\n{email_content}".strip()
+    else:
+      return subject or email_content or ""
 
 
 
@@ -152,6 +161,31 @@ class MailService:
     for doc, emb in zip(docs_list, embeddings):
       message_id = doc["message_id"]
       labels = doc.get("labels") or []
+      # Use same content priority logic as _build_embedding_text: body > snippet
+      if doc.get("body") and len(doc["body"].strip()) > 50:
+        email_content = doc["body"]
+      else:
+        email_content = doc.get("snippet") or ""
+      subject = doc.get("subject") or ""
+
+      # Calculate word count and reading time
+      full_text = f"{subject}\n\n{email_content}".strip()
+      word_count = len(full_text.split())
+      reading_time = max(1, word_count // 200)  # Average reading speed: 200 words/min
+
+      # Skip embedding if content is too short (draft-like emails)
+      if word_count < 3 and not any(label in ["INBOX", "IMPORTANT"] for label in labels):
+        continue
+
+      # Check for attachments
+      has_attachments = doc.get("has_attachments", False)
+      attachments = doc.get("attachments", [])
+      attachment_types = []
+      if attachments and isinstance(attachments, list):
+        for att in attachments:
+          if isinstance(att, dict) and att.get("mime_type"):
+            attachment_types.append(att["mime_type"])
+
       items.append(
         {
           "message_id": message_id,
@@ -393,7 +427,14 @@ class MailService:
           filter_query["labels"] = {"$in": [gmail_label_id]}
       
     logger.info(f"[SEMANTIC REBUILD] Generating embeddings for user {user_id} from emails...")
-    email_cursor = self.email_index_collection.find(filter_query)
+    # Find emails that exist in both collections and are marked as embedded
+    embedded_message_ids = await self.email_index_collection.distinct(
+        "message_id",
+        {"is_embedded": True, **filter_query}
+    )
+    email_cursor = self.emails_collection.find({
+        "message_id": {"$in": embedded_message_ids}
+    })
     batch_docs = []
     async for doc in email_cursor:
       batch_docs.append(doc)
@@ -2282,14 +2323,14 @@ class MailService:
         {"is_embedded": {"$ne": True}},
         limit=batch_size
       ).sort("received_on", -1)
-      
+
       docs = await cursor.to_list(length=batch_size)
-      
+
       if not docs:
         return
 
       logger.info(f"Processing embedding for {len(docs)} emails")
-      
+
       # Group by user_id
       docs_by_user = {}
       for doc in docs:
@@ -2297,20 +2338,29 @@ class MailService:
         if uid not in docs_by_user:
           docs_by_user[uid] = []
         docs_by_user[uid].append(doc)
-      
+
       vector_store = get_vector_store()
+      successfully_embedded_ids = []
+
       for uid, user_docs in docs_by_user.items():
-        await self._upsert_embeddings_batch(uid, user_docs, vector_store)
-      
-      # Update is_embedded flag
-      message_ids = [d["message_id"] for d in docs]
-      await self.email_index_collection.update_many(
-        {"message_id": {"$in": message_ids}},
-        {"$set": {"is_embedded": True}}
-      )
-      
-      logger.info(f"Successfully embedded {len(docs)} emails")
-      
+        try:
+          await self._upsert_embeddings_batch(uid, user_docs, vector_store)
+          # Only mark as embedded if upsert succeeded
+          for doc in user_docs:
+            successfully_embedded_ids.append(doc["message_id"])
+        except Exception as e:
+          logger.error(f"Failed to embed batch for user {uid}: {e}")
+          # Don't mark failed batches as embedded
+
+      # Update is_embedded flag ONLY for successfully embedded emails
+      if successfully_embedded_ids:
+        await self.email_index_collection.update_many(
+          {"message_id": {"$in": successfully_embedded_ids}},
+          {"$set": {"is_embedded": True}}
+        )
+
+        logger.info(f"Successfully embedded {len(successfully_embedded_ids)} emails")
+
     except Exception as e:
       logger.error(f"Error in process_embedding_queue: {e}")
 
