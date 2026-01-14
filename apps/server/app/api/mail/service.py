@@ -127,19 +127,23 @@ class MailService:
 
   def _build_embedding_text(self, doc: Dict[str, Any]) -> str:
     subject = doc.get("subject") or ""
+    body = doc.get("body", "")
+    snippet = doc.get("snippet", "")
 
-    # Prioritize content sources: body > snippet
+    # Use body from emails collection, fallback to snippet
     email_content = ""
-    if doc.get("body") and len(doc["body"].strip()) > 50:
-      email_content = doc["body"]
-    elif doc.get("snippet"):
-      email_content = doc["snippet"]
+    if body and len(body.strip()) > 20:
+      email_content = body
+    elif snippet and len(snippet.strip()) > 20:
+      email_content = snippet
 
-    # Combine subject and body content
+    # Combine subject and content
     if email_content and subject:
-      return f"{subject}\n\n{email_content}".strip()
+      result = f"{subject}\n\n{email_content}".strip()
+      return result
     else:
-      return subject or email_content or ""
+      result = subject or email_content or ""
+      return result
 
 
 
@@ -161,20 +165,33 @@ class MailService:
     for doc, emb in zip(docs_list, embeddings):
       message_id = doc["message_id"]
       labels = doc.get("labels") or []
-      # Use same content priority logic as _build_embedding_text: body > snippet
-      if doc.get("body") and len(doc["body"].strip()) > 50:
-        email_content = doc["body"]
+
+      # Skip draft emails
+      if "DRAFT" in labels:
+        continue
+
+      # Skip emails with empty subject or body
+      subject = doc.get("subject", "").strip()
+      body = doc.get("body", "").strip()
+      if not subject or not body:
+        continue
+
+      # Use same content priority logic as _build_embedding_text
+      snippet = doc.get("snippet", "")
+      if body and len(body) > 20:
+        email_content = body
+      elif snippet and len(snippet.strip()) > 20:
+        email_content = snippet
       else:
-        email_content = doc.get("snippet") or ""
-      subject = doc.get("subject") or ""
+        email_content = ""
 
       # Calculate word count and reading time
       full_text = f"{subject}\n\n{email_content}".strip()
       word_count = len(full_text.split())
       reading_time = max(1, word_count // 200)  # Average reading speed: 200 words/min
 
-      # Skip embedding if content is too short (draft-like emails)
-      if word_count < 3 and not any(label in ["INBOX", "IMPORTANT"] for label in labels):
+      # Skip emails with too little content
+      if word_count < 2 or len(full_text.strip()) < 10:
         continue
 
       # Check for attachments
@@ -337,7 +354,7 @@ class MailService:
     logger.info(f"[SEMANTIC SEARCH] user_id={user_id}, query='{query}', mailbox_id={mailbox_id}, page={page}, limit={limit}")
 
     # Minimum similarity score threshold for relevance
-    SCORE_THRESHOLD = 0.8
+    SCORE_THRESHOLD = 0.5
 
     mailbox_label_id: Optional[str] = None
     if mailbox_id:
@@ -2319,12 +2336,31 @@ class MailService:
   async def process_embedding_queue(self):
     try:
       batch_size = settings.EMBEDDING_BATCH_SIZE
-      cursor = self.email_index_collection.find(
-        {"is_embedded": {"$ne": True}},
+
+      # Find message_ids from email_index that are not embedded yet
+      unembedded_message_ids = await self.email_index_collection.distinct(
+        "message_id",
+        {"is_embedded": {"$ne": True}}
+      )
+
+      if not unembedded_message_ids:
+        return
+
+      # Limit to batch_size and sort by received_on
+      unembedded_cursor = self.email_index_collection.find(
+        {"message_id": {"$in": unembedded_message_ids}},
         limit=batch_size
       ).sort("received_on", -1)
 
-      docs = await cursor.to_list(length=batch_size)
+      unembedded_docs = await unembedded_cursor.to_list(length=batch_size)
+      message_ids_to_process = [doc["message_id"] for doc in unembedded_docs]
+
+      # Get full email data from emails_collection
+      email_cursor = self.emails_collection.find({
+        "message_id": {"$in": message_ids_to_process}
+      })
+
+      docs = await email_cursor.to_list(length=len(message_ids_to_process))
 
       if not docs:
         return

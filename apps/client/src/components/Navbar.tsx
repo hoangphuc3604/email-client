@@ -36,6 +36,8 @@ function NavBar() {
 
   const { searchResults, lastSearchQuery, setSelectedEmail } = useSearch();
 
+  console.log('Navbar render - searchQuery:', searchQuery, 'showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length);
+
   // Sync searchQuery with lastSearchQuery for suggestions
   useEffect(() => {
     if (lastSearchQuery && !searchQuery) {
@@ -99,19 +101,26 @@ function NavBar() {
 
   // [NEW] Debounced auto-suggestions from API
   useEffect(() => {
+    console.log('useEffect triggered - searchQuery:', searchQuery);
     const delayDebounceFn = setTimeout(async () => {
+      console.log('debounce executed - searchQuery:', searchQuery);
       if (searchQuery.length >= 2) {
         try {
+          console.log('calling API for:', searchQuery);
           const results = await mailApi.searchEmailsSemantic(searchQuery);
+          console.log('API results:', results);
           const list = Array.isArray(results) ? results : [];
+          console.log('setting suggestions:', list.length, 'items');
           setSuggestions(list);
           setShowSuggestions(list.length > 0);
+          console.log('setShowSuggestions:', list.length > 0);
         } catch (error) {
           console.error("Auto-suggest failed", error);
           setSuggestions([]);
           setShowSuggestions(false);
         }
       } else {
+        console.log('clearing suggestions');
         setSuggestions([]);
         setShowSuggestions(false);
       }
@@ -206,7 +215,10 @@ function NavBar() {
                 placeholder="Search emails..."
                 className="border-start-0 ps-0"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  console.log('onChange - new value:', e.target.value);
+                  setSearchQuery(e.target.value);
+                }}
                 onKeyDown={handleSearch}
                 onFocus={() => {
                     // Show suggestions again if we have query and results
@@ -217,18 +229,30 @@ function NavBar() {
             </InputGroup>
 
             {/* [NEW] Type-ahead Suggestions Dropdown */}
-            {showSuggestions && suggestions.length > 0 && (
-              <ListGroup
-                className="position-absolute w-100 shadow mt-1"
+            {(() => {
+              const shouldShow = showSuggestions && suggestions.length > 0;
+              console.log('dropdown render check - showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length, 'shouldShow:', shouldShow);
+              return shouldShow;
+            })() && (
+              <div
                 style={{
-                    top: '100%',
-                    zIndex: 1050,
-                    maxHeight: '400px',
-                    overflowY: 'auto',
-                    border: '1px solid rgba(0,0,0,0.1)',
-                    borderRadius: '4px'
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  zIndex: 9999
                 }}
               >
+                <ListGroup
+                  className="shadow"
+                  style={{
+                      maxHeight: '400px',
+                      overflowY: 'auto',
+                      border: '1px solid rgba(0,0,0,0.1)',
+                      borderRadius: '4px',
+                      backgroundColor: 'white'
+                  }}
+                >
                 {suggestions.map((item: any, idx) => {
                    const subject = item.subject || "(No Subject)";
                    const senderName = typeof item.sender === 'string'
@@ -253,7 +277,8 @@ function NavBar() {
                     </ListGroup.Item>
                    )
                 })}
-              </ListGroup>
+                </ListGroup>
+              </div>
             )}
           </Form>
         )}
