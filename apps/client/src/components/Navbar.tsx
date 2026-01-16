@@ -233,18 +233,7 @@ function NavBar() {
         {/* ... Rest of the Navbar code (Collapse, Nav Links, User Dropdown) remains unchanged ... */}
         <Navbar.Collapse id="responsive-navbar-nav">
           <Nav className="ms-auto" defaultActiveKey="#home">
-            <Nav.Item>
-              <Nav.Link
-                as={Link}
-                to="/dashboard"
-                onClick={() => updateExpanded(false)}
-              >
-                <AiOutlineFundProjectionScreen
-                  style={{ marginBottom: "2px" }}
-                />{" "}
-                Dashboard
-              </Nav.Link>
-            </Nav.Item>
+            
 
             {!user ? (
               initializing ? null : (
