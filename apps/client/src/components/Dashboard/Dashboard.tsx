@@ -41,7 +41,7 @@ import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 import { BsKanban, BsListUl } from 'react-icons/bs'; 
 import { AiOutlineClose } from 'react-icons/ai'; // [Cập nhật] Icon đóng
 import KanbanBoard from './KanbanBoard'; 
-import { useSearchParams } from 'react-router-dom'; // [Cập nhật] Hook lấy query param
+import { useSearchParams } from 'react-router-dom'; // already present
 
 // Map Gmail label IDs to friendly names
 const LABEL_NAME_MAP: Record<string, string> = {
@@ -107,6 +107,7 @@ export default function Dashboard() {
   // [Cập nhật] Hook xử lý search query
   const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('q');
+  const folderParam = searchParams.get('folder') || undefined; // [NEW] read folder from URL
 
   useEffect(() => {
     try {
@@ -259,10 +260,17 @@ export default function Dashboard() {
     return inboxPreviews.filter((e: any) => e.unread === true).length
   }, [previewsMap])
 
+  // [NEW] Sync folder from URL (?folder=...) triggered from Navbar
+  useEffect(() => {
+    if (folderParam && folderParam !== selectedFolder) {
+      selectFolder(folderParam);
+    }
+  }, [folderParam]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function selectFolder(id: string) {
-    // [Cập nhật] Xóa search params khi người dùng chuyển folder thủ công
+    // [CHANGED] Keep URL in sync when switching folder (except search_results)
     if (id !== 'search_results') {
-      setSearchParams({});
+      setSearchParams({ folder: id });
     }
 
     // Reset all states for clean folder switch
@@ -271,8 +279,8 @@ export default function Dashboard() {
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
-    setError(null) // Clear any previous errors
-    setLoadingMore(false) // Reset loading more state
+    setError(null)
+    setLoadingMore(false)
 
     // Reset scroll position for new folder
     if (listRef.current) {
@@ -280,7 +288,6 @@ export default function Dashboard() {
       scrollTopRef.current = 0
     }
 
-    // Không load lại nếu là folder search_results (vì dữ liệu lấy từ API search)
     if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
       loadFolderData(id, true)
     }
@@ -486,8 +493,8 @@ export default function Dashboard() {
       setMailboxes(uniqueFiltered.length > 0 ? uniqueFiltered : [])
       setLoadingMailboxes(false)
       
-      // Nếu có query search thì không load inbox mặc định để tránh ghi đè UI
-      if (!searchQuery) {
+      // [CHANGED] Only auto-load Inbox when no search and no folder param
+      if (!searchQuery && !searchParams.get('folder')) {
         const inboxId = 'inbox'
         await loadFolderData(inboxId, true)
       }
@@ -1254,7 +1261,8 @@ export default function Dashboard() {
       <Particle />
       <Container className="dashboard-container">
         <Row className="dashboard-row">
-          <Col md={2} className={`folder-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
+          {/* [CHANGED] Mailbox column: fully hidden on mobile */}
+          <Col md={2} className="folder-column d-none d-md-block">
             <div className="folders-header pt-3">
               <h5>Mailboxes</h5>
             </div>
@@ -1340,7 +1348,11 @@ export default function Dashboard() {
             </Col>
           ) : (
             <>
-          <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
+          {/* [CHANGED] List column: hide on mobile when in detail view */}
+          <Col
+            md={4}
+            className={`email-list-column ${mobileView === 'detail' ? 'd-none d-md-flex' : 'd-flex'}`}
+          >
              {/* [Cập nhật] Header cho trang kết quả tìm kiếm */}
              {selectedFolder === 'search_results' && (
                 <div className="alert alert-info py-2 px-3 mb-2 d-flex justify-content-between align-items-center">
@@ -1518,7 +1530,11 @@ export default function Dashboard() {
             </div>
           </Col>
 
-          <Col md={6} className={`email-detail-column ${mobileView === 'list' ? 'hide-on-mobile' : ''}`}>
+          {/* [CHANGED] Detail column: hide on mobile when in list view */}
+          <Col
+            md={6}
+            className={`email-detail-column ${mobileView === 'list' ? 'd-none d-md-flex' : 'd-flex'}`}
+          >
             {loadingEmail ? (
               <div className="text-center mt-5">
                 <FaSync className="fa-spin" size={48} />

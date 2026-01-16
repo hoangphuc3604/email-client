@@ -430,3 +430,41 @@ div[style*="overflow: auto"]::-webkit-scrollbar-thumb:hover {
   color: #0b3af4 !important; /* Màu xanh dương neon */
   filter: drop-shadow(0 0 2px #0b3af4); /* Thêm chút hiệu ứng phát sáng nếu thích */
 }
+
+
+
+/* Mobile Enhancements */
+@media (max-width: 767px) {
+  /* Dashboard row chiếm full màn hình trừ navbar */
+  .dashboard-container {
+    height: calc(100vh - 60px) !important; /* Điều chỉnh chiều cao cho vừa */
+    margin-top: 10px !important;
+  }
+  
+  .dashboard-row {
+    height: 100% !important;
+    border-radius: 0 !important; /* Bỏ bo góc trên mobile cho rộng chỗ */
+  }
+
+  /* Mailbox column đã bị ẩn bằng class d-none d-md-block trong code React */
+  
+  /* List Column & Detail Column chiếm full width */
+  .email-list-column, 
+  .email-detail-column {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 0 0 100% !important;
+    border-right: none !important;
+  }
+
+  /* Tinh chỉnh item trong list cho dễ bấm */
+  .email-list .list-group-item {
+    padding: 1rem !important;
+  }
+
+  /* Ẩn scrollbar ngang không cần thiết */
+  .dashboard-section {
+    padding: 55px 0 0 0 !important; /* Sát lề, chừa chỗ cho Navbar */
+    overflow-x: hidden;
+  }
+}

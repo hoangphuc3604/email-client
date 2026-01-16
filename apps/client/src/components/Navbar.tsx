@@ -23,6 +23,32 @@ import {
 import useAuthStore from '../store/authStore'
 import { useLogout } from '../hooks/useAuth'
 import mailApi from "../api/mail"; // [NEW] Import API
+// [NEW] Folder icons
+import { 
+  FaInbox, FaStar, FaPaperPlane, FaPen, FaBan, 
+  FaExclamationTriangle, FaFileArchive, FaTrash, 
+  FaTasks, FaClock, FaCheckSquare, FaFolder 
+} from 'react-icons/fa';
+
+// [NEW] Map icons giống Dashboard
+const getIconForFolder = (id: string) => {
+  const lowerId = String(id || '').toLowerCase();
+  switch (lowerId) {
+    case 'inbox': return <FaInbox className="me-2" />;
+    case 'starred': return <FaStar className="me-2" />;
+    case 'sent': return <FaPaperPlane className="me-2" />;
+    case 'draft': 
+    case 'drafts': return <FaPen className="me-2" />;
+    case 'spam': return <FaBan className="me-2" />;
+    case 'important': return <FaExclamationTriangle className="me-2" />;
+    case 'archive': return <FaFileArchive className="me-2" />;
+    case 'trash': return <FaTrash className="me-2" />;
+    case 'todo': return <FaTasks className="me-2" />;
+    case 'snoozed': return <FaClock className="me-2" />;
+    case 'done': return <FaCheckSquare className="me-2" />;
+    default: return <FaFolder className="me-2" />;
+  }
+};
 
 function NavBar() {
   const [expand, updateExpanded] = useState(false);
@@ -144,6 +170,43 @@ function NavBar() {
     setSearchQuery(term);
     performSearch(term);
   }
+
+  // [NEW] Mobile Mailbox State
+  const [mobileMailboxes, setMobileMailboxes] = useState<any[]>([]);
+
+  // [NEW] Load Mailboxes for Mobile Menu when expanded
+  useEffect(() => {
+    if (user && isMobile && expand) {
+      mailApi.listMailboxes()
+        .then((data: any[]) => {
+          const filtered = (data || []).map((box: any) => {
+            const nameUpper = String(box.name || '').toUpperCase();
+            let normalizedId = String(box.id || box.name || '').toLowerCase();
+            let displayName = box.name || normalizedId;
+
+            if (nameUpper === 'TODO' || nameUpper === 'TO DO') { normalizedId = 'todo'; displayName = 'Todo'; }
+            else if (nameUpper === 'DONE') { normalizedId = 'done'; displayName = 'Done'; }
+            else if (nameUpper === 'SNOOZED') { normalizedId = 'snoozed'; displayName = 'Snoozed'; }
+
+            return { ...box, id: normalizedId, name: displayName };
+          });
+          const seenIds = new Set<string>();
+          const uniqueFiltered = filtered.filter((box: any) => {
+            if (seenIds.has(box.id)) return false;
+            seenIds.add(box.id);
+            return true;
+          });
+          setMobileMailboxes(uniqueFiltered);
+        })
+        .catch(err => console.error("Nav mailbox fetch error", err));
+    }
+  }, [user, isMobile, expand]);
+
+  // [NEW] Handle Mobile Folder Click
+  const handleMobileFolderClick = (folderId: string) => {
+    updateExpanded(false);
+    navigate(`/dashboard?folder=${encodeURIComponent(folderId)}`);
+  };
 
   return (
     <Navbar
@@ -319,52 +382,44 @@ function NavBar() {
         {/* [CHANGED] Collapse shows folder-column on mobile; desktop unchanged */}
         <Navbar.Collapse id="responsive-navbar-nav">
           {isMobile ? (
+            // [CHANGED] Dynamic mobile folders from API
             <Nav className="w-100" defaultActiveKey="#inbox">
-              <Nav.Item>
-                <Nav.Link
-                  as={Link}
-                  to="/dashboard?folder=inbox"
-                  onClick={() => updateExpanded(false)}
-                >
-                  Inbox
-                </Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
-                <Nav.Link
-                  as={Link}
-                  to="/dashboard?folder=starred"
-                  onClick={() => updateExpanded(false)}
-                >
-                  Starred
-                </Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
-                <Nav.Link
-                  as={Link}
-                  to="/dashboard?folder=sent"
-                  onClick={() => updateExpanded(false)}
-                >
-                  Sent
-                </Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
-                <Nav.Link
-                  as={Link}
-                  to="/dashboard?folder=drafts"
-                  onClick={() => updateExpanded(false)}
-                >
-                  Drafts
-                </Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
-                <Nav.Link
-                  as={Link}
-                  to="/dashboard?folder=trash"
-                  onClick={() => updateExpanded(false)}
-                >
-                  Trash
-                </Nav.Link>
-              </Nav.Item>
+              {mobileMailboxes.length > 0 ? (
+                mobileMailboxes.map((box) => (
+                  <Nav.Item key={box.id}>
+                    <Nav.Link
+                      as="button"
+                      onClick={() => handleMobileFolderClick(box.id)}
+                      className="d-flex align-items-center bg-transparent border-0"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {getIconForFolder(box.id)}
+                      <span className="text-capitalize">{box.name}</span>
+                    </Nav.Link>
+                  </Nav.Item>
+                ))
+              ) : (
+                <>
+                  {/* Fallback to existing static links if API returns empty */}
+                  {/* ...existing code...
+                  <Nav.Item>
+                    <Nav.Link as={Link} to="/dashboard?folder=inbox" onClick={() => updateExpanded(false)}>Inbox</Nav.Link>
+                  </Nav.Item>
+                  <Nav.Item>
+                    <Nav.Link as={Link} to="/dashboard?folder=starred" onClick={() => updateExpanded(false)}>Starred</Nav.Link>
+                  </Nav.Item>
+                  <Nav.Item>
+                    <Nav.Link as={Link} to="/dashboard?folder=sent" onClick={() => updateExpanded(false)}>Sent</Nav.Link>
+                  </Nav.Item>
+                  <Nav.Item>
+                    <Nav.Link as={Link} to="/dashboard?folder=drafts" onClick={() => updateExpanded(false)}>Drafts</Nav.Link>
+                  </Nav.Item>
+                  <Nav.Item>
+                    <Nav.Link as={Link} to="/dashboard?folder=trash" onClick={() => updateExpanded(false)}>Trash</Nav.Link>
+                  </Nav.Item>
+                  ...existing code... */}
+                </>
+              )}
             </Nav>
           ) : (
             <Nav className="ms-auto" defaultActiveKey="#home">
