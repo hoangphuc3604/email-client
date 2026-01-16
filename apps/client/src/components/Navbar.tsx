@@ -27,6 +27,14 @@ import mailApi from "../api/mail"; // [NEW] Import API
 function NavBar() {
   const [expand, updateExpanded] = useState(false);
   const [navColour, updateNavbar] = useState(false);
+
+  // [NEW] Track mobile viewport to adjust UI
+  const [isMobile, setIsMobile] = useState<boolean>(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   
   // Search States
   const [searchQuery, setSearchQuery] = useState(""); 
@@ -146,18 +154,19 @@ function NavBar() {
     >
       <Container>
         <Navbar.Brand href="/" className="d-flex">
-          <img src={logo} className="img-fluid logo" alt="brand" />
+          {/* [CHANGED] Compact logo on mobile */}
+          <img src={logo} className="img-fluid logo" alt="brand" style={{ height: isMobile ? 24 : 32 }} />
         </Navbar.Brand>
-        
+
+        {/* [CHANGED] Compact search on mobile */}
         {user && (
-          // Added ref for click-outside detection
           <Form 
             ref={searchContainerRef}
             className="d-flex mx-auto search-box-nav position-relative" 
             onSubmit={handleSearch} 
-            style={{ maxWidth: '400px', width: '100%' }}
+            style={{ maxWidth: isMobile ? '220px' : '400px', width: '100%' }}
           >
-            <InputGroup>
+            <InputGroup size={isMobile ? 'sm' : undefined}>
               <InputGroup.Text className="bg-white border-end-0">
                 <AiOutlineSearch />
               </InputGroup.Text>
@@ -169,7 +178,6 @@ function NavBar() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearch}
                 onFocus={() => {
-                    // Show suggestions again if we have query and results
                     if (searchQuery.length >= 2 && suggestions.length > 0) setShowSuggestions(true);
                 }}
                 aria-label="Search"
@@ -219,6 +227,84 @@ function NavBar() {
           </Form>
         )}
 
+        {/* [NEW] Mobile-only avatar next to search (circle only) */}
+        {user && isMobile && (
+          <Dropdown align="end" className="ms-2">
+            <Dropdown.Toggle
+              id="user-dropdown-mobile"
+              variant="light"
+              className="d-flex align-items-center border-0 user-pill-toggle"
+            >
+              {(() => {
+                const email = user?.email ?? '';
+                const name = (user as any)?.name ?? '';
+                const provider = (user as any)?.provider as ('google' | 'email' | undefined);
+                const isGoogle = provider === 'google' || (!!user?.picture && !provider);
+                const displayName = isGoogle ? (name || email) : (name || email);
+                const avatarUrl = user?.picture || user?.avatar;
+                const fallbackInitial = (displayName || '?').charAt(0).toUpperCase();
+                return (
+                  <span className="d-flex align-items-center" style={{ color: '#fff' }}>
+                    {avatarUrl ? (
+                      <Image
+                        src={avatarUrl}
+                        alt="avatar"
+                        roundedCircle
+                        width={28}
+                        height={28}
+                        style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
+                      />
+                    ) : (
+                      <span
+                        aria-label="avatar"
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          backgroundColor: 'rgba(255,255,255,0.9)',
+                          color: '#c95bf5',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 600,
+                          border: '2px solid rgba(255,255,255,0.9)'
+                        }}
+                      >
+                        {fallbackInitial}
+                      </span>
+                    )}
+                  </span>
+                )
+              })()}
+            </Dropdown.Toggle>
+            {/* Same dropdown menu as desktop (account info + Logout) */}
+            <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
+              <Dropdown.Header>
+                {(() => {
+                  const email = user?.email ?? '';
+                  const name = (user as any)?.name ?? '';
+                  const provider = (user as any)?.provider as ('google' | 'email' | undefined);
+                  const isGoogle = provider === 'google' || (!!user?.picture && !provider);
+                  const displayName = isGoogle ? (name || email) : (name || email);
+                  return (
+                    <>
+                      <span className="text-white-50">Signed in as</span>
+                      <div style={{ fontWeight: 600, color: '#fff' }}>{displayName}</div>
+                      {email ? (
+                        <div className="text-white-50" style={{ fontSize: 12 }}>{email}</div>
+                      ) : null}
+                    </>
+                  )
+                })()}
+              </Dropdown.Header>
+              <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
+              <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>
+                <AiOutlineLogout className="logout-icon-blue" style={{ marginBottom: '2px' }} /> <span className="logout-text-blue">Logout</span>
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown>
+        )}
+
         <Navbar.Toggle
           aria-controls="responsive-navbar-nav"
           onClick={() => {
@@ -229,117 +315,166 @@ function NavBar() {
           <span></span>
           <span></span>
         </Navbar.Toggle>
-        
-        {/* ... Rest of the Navbar code (Collapse, Nav Links, User Dropdown) remains unchanged ... */}
+
+        {/* [CHANGED] Collapse shows folder-column on mobile; desktop unchanged */}
         <Navbar.Collapse id="responsive-navbar-nav">
-          <Nav className="ms-auto" defaultActiveKey="#home">
-            
+          {isMobile ? (
+            <Nav className="w-100" defaultActiveKey="#inbox">
+              <Nav.Item>
+                <Nav.Link
+                  as={Link}
+                  to="/dashboard?folder=inbox"
+                  onClick={() => updateExpanded(false)}
+                >
+                  Inbox
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link
+                  as={Link}
+                  to="/dashboard?folder=starred"
+                  onClick={() => updateExpanded(false)}
+                >
+                  Starred
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link
+                  as={Link}
+                  to="/dashboard?folder=sent"
+                  onClick={() => updateExpanded(false)}
+                >
+                  Sent
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link
+                  as={Link}
+                  to="/dashboard?folder=drafts"
+                  onClick={() => updateExpanded(false)}
+                >
+                  Drafts
+                </Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link
+                  as={Link}
+                  to="/dashboard?folder=trash"
+                  onClick={() => updateExpanded(false)}
+                >
+                  Trash
+                </Nav.Link>
+              </Nav.Item>
+            </Nav>
+          ) : (
+            <Nav className="ms-auto" defaultActiveKey="#home">
+              {!user ? (
+                initializing ? null : (
+                  <>
+                    <Nav.Item>
+                      <Nav.Link
+                        as={Link}
+                        to="/login"
+                        onClick={() => updateExpanded(false)}
+                      >
+                        <AiOutlineUser style={{ marginBottom: "2px" }} /> Sign in
+                      </Nav.Link>
+                    </Nav.Item>
 
-            {!user ? (
-              initializing ? null : (
-                <>
-                  <Nav.Item>
-                    <Nav.Link
-                      as={Link}
-                      to="/login"
-                      onClick={() => updateExpanded(false)}
+                    <Nav.Item>
+                      <Nav.Link
+                        as={Link}
+                        to="/signup"
+                        onClick={() => updateExpanded(false)}
+                      >
+                        <ImBlog style={{ marginBottom: "2px" }} /> Sign up
+                      </Nav.Link>
+                    </Nav.Item>
+                  </>
+                )
+              ) : (
+                <Nav.Item className="d-flex align-items-center">
+                  <Dropdown align="end">
+                    <Dropdown.Toggle
+                      id="user-dropdown"
+                      variant="light"
+                      className="d-flex align-items-center border-0 user-pill-toggle"
                     >
-                      <AiOutlineUser style={{ marginBottom: "2px" }} /> Sign in
-                    </Nav.Link>
-                  </Nav.Item>
-
-                  <Nav.Item>
-                    <Nav.Link
-                      as={Link}
-                      to="/signup"
-                      onClick={() => updateExpanded(false)}
-                    >
-                      <ImBlog style={{ marginBottom: "2px" }} /> Sign up
-                    </Nav.Link>
-                  </Nav.Item>
-                </>
-              )
-            ) : (
-              <Nav.Item className="d-flex align-items-center">
-                <Dropdown align="end">
-                  <Dropdown.Toggle
-                    id="user-dropdown"
-                    variant="light"
-                    className="d-flex align-items-center border-0 user-pill-toggle"
-                  >
-                    {(() => {
-                      const email = user?.email ?? ''
-                      const name = (user as any)?.name ?? ''
-                      const provider = (user as any)?.provider as ('google' | 'email' | undefined)
-                      const isGoogle = provider === 'google' || (!!user?.picture && !provider)
-                      const displayName = isGoogle ? (name || email) : (name || email)
-                      const avatarUrl = user?.picture || user?.avatar
-                      const fallbackInitial = (displayName || '?').charAt(0).toUpperCase()
-                      return (
-                        <span className="d-flex align-items-center" style={{ color: '#fff' }}>
-                          {avatarUrl ? (
-                            <Image
-                              src={avatarUrl}
-                              alt="avatar"
-                              roundedCircle
-                              width={32}
-                              height={32}
-                              style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
-                            />
-                          ) : (
-                            <span
-                              aria-label="avatar"
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: '50%',
-                                backgroundColor: 'rgba(255,255,255,0.9)',
-                                color: '#c95bf5',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontWeight: 600,
-                                border: '2px solid rgba(255,255,255,0.9)'
-                              }}
-                            >
-                              {fallbackInitial}
-                            </span>
-                          )}
-                          <span className="ms-2" style={{ fontSize: 13 }}>
-                            {displayName}
-                          </span>
-                        </span>
-                      )
-                    })()}
-                  </Dropdown.Toggle>
-                  <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
-                    <Dropdown.Header>
                       {(() => {
                         const email = user?.email ?? ''
                         const name = (user as any)?.name ?? ''
                         const provider = (user as any)?.provider as ('google' | 'email' | undefined)
                         const isGoogle = provider === 'google' || (!!user?.picture && !provider)
                         const displayName = isGoogle ? (name || email) : (name || email)
+                        const avatarUrl = user?.picture || user?.avatar
+                        const fallbackInitial = (displayName || '?').charAt(0).toUpperCase()
                         return (
-                          <>
-                            <span className="text-white-50">Signed in as</span>
-                            <div style={{ fontWeight: 600, color: '#fff' }}>{displayName}</div>
-                            {email ? (
-                              <div className="text-white-50" style={{ fontSize: 12 }}>{email}</div>
-                            ) : null}
-                          </>
+                          <span className="d-flex align-items-center" style={{ color: '#fff' }}>
+                            {avatarUrl ? (
+                              <Image
+                                src={avatarUrl}
+                                alt="avatar"
+                                roundedCircle
+                                width={isMobile ? 28 : 32}
+                                height={isMobile ? 28 : 32}
+                                style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
+                              />
+                            ) : (
+                              <span
+                                aria-label="avatar"
+                                style={{
+                                  width: isMobile ? 28 : 32,
+                                  height: isMobile ? 28 : 32,
+                                  borderRadius: '50%',
+                                  backgroundColor: 'rgba(255,255,255,0.9)',
+                                  color: '#c95bf5',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 600,
+                                  border: '2px solid rgba(255,255,255,0.9)'
+                                }}
+                              >
+                                {fallbackInitial}
+                              </span>
+                            )}
+                            {/* [CHANGED] Hide display name on mobile */}
+                            <span className="ms-2 d-none d-md-inline" style={{ fontSize: 13 }}>
+                              {displayName}
+                            </span>
+                          </span>
                         )
                       })()}
-                    </Dropdown.Header>
-                    <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
-                    <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>
-                      <AiOutlineLogout className="logout-icon-blue" style={{ marginBottom: '2px' }} /> <span className="logout-text-blue">Logout</span>
-                    </Dropdown.Item>
-                  </Dropdown.Menu>
-                </Dropdown>
-              </Nav.Item>
-            )}
-          </Nav>
+                    </Dropdown.Toggle>
+                    <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
+                      <Dropdown.Header>
+                        {(() => {
+                          const email = user?.email ?? ''
+                          const name = (user as any)?.name ?? ''
+                          const provider = (user as any)?.provider as ('google' | 'email' | undefined)
+                          const isGoogle = provider === 'google' || (!!user?.picture && !provider)
+                          const displayName = isGoogle ? (name || email) : (name || email)
+                          return (
+                            <>
+                              <span className="text-white-50">Signed in as</span>
+                              <div style={{ fontWeight: 600, color: '#fff' }}>{displayName}</div>
+                              {email ? (
+                                <div className="text-white-50" style={{ fontSize: 12 }}>{email}</div>
+                              ) : null}
+                            </>
+                          )
+                        })()}
+                      </Dropdown.Header>
+                      <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
+                      <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>
+                        <AiOutlineLogout className="logout-icon-blue" style={{ marginBottom: '2px' }} /> <span className="logout-text-blue">Logout</span>
+                      </Dropdown.Item>
+                    </Dropdown.Menu>
+                  </Dropdown>
+                </Nav.Item>
+              )}
+            </Nav>
+          )}
         </Navbar.Collapse>
       </Container>
     </Navbar>
