@@ -930,3 +930,103 @@ button:focus {
     margin-top: 5px;
   }
 }
+
+
+/* Offcanvas container theme */
+.mobile-sidebar-offcanvas {
+  background-color: #1b1a2e !important; /* Màu nền tối giống navbar */
+  color: white !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Offcanvas Header */
+.mobile-sidebar-offcanvas .offcanvas-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Offcanvas Body Items */
+.mobile-mailbox-item {
+  padding: 12px 15px;
+  color: rgba(255, 255, 255, 0.8) !important;
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 1rem;
+}
+
+.mobile-mailbox-item:hover,
+.mobile-mailbox-item:active {
+  background-color: rgba(199, 112, 240, 0.2);
+  color: #fff !important;
+}
+
+.mobile-mailbox-section-header {
+  padding: 10px 15px 5px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: #be6adf;
+  font-weight: 700;
+  margin-top: 5px;
+  opacity: 0.8;
+}
+
+/* User Avatar fallback styles */
+.user-avatar-fallback {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: rgba(255,255,255,0.9);
+  color: #c95bf5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+/* Search Suggestions dropdown styling */
+.suggestions-dropdown {
+    top: 100%;
+    z-index: 1050; 
+    max-height: 300px; 
+    overflow-y: auto;
+    border: 1px solid rgba(0,0,0,0.1);
+    border-radius: 4px;
+}
+
+.suggestion-item {
+    cursor: pointer;
+}
+.suggestion-item .subject {
+    font-size: 0.9rem;
+    color: #333; /* Dark text for suggestions (assuming white background) */
+}
+.suggestion-item .sender {
+    color: #666;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 767px) {
+  /* Navbar Container layout: Toggle - Search - Avatar */
+  .navbar .container {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  /* Search bar takes available space */
+  .search-box-nav {
+    flex-grow: 1 !important;
+    margin: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  .search-box-nav input {
+      height: 36px;
+  }
+}

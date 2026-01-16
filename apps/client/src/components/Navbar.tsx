@@ -12,6 +12,8 @@ import { useNavigate } from 'react-router-dom'
 import Form from "react-bootstrap/Form";
 import InputGroup from "react-bootstrap/InputGroup";
 import ListGroup from "react-bootstrap/ListGroup"; // [NEW] For suggestion list
+import Offcanvas from "react-bootstrap/Offcanvas"; // [NEW]
+import Button from "react-bootstrap/Button";       // [NEW]
 
 import { ImBlog } from "react-icons/im";
 import {
@@ -27,7 +29,7 @@ import mailApi from "../api/mail"; // [NEW] Import API
 import { 
   FaInbox, FaStar, FaPaperPlane, FaPen, FaBan, 
   FaExclamationTriangle, FaFileArchive, FaTrash, 
-  FaTasks, FaClock, FaCheckSquare, FaFolder 
+  FaTasks, FaClock, FaCheckSquare, FaFolder, FaBars   // [NEW] FaBars
 } from 'react-icons/fa';
 
 // [NEW] Map icons giống Dashboard
@@ -157,7 +159,7 @@ function NavBar() {
 
   // [NEW] Helper to trigger search navigation
   const performSearch = (query: string) => {
-    updateExpanded(false);
+    setShowOffcanvas(false);
     setShowSuggestions(false);
     // Navigate triggers the Dashboard to load, which executes the Semantic Search
     navigate(`/dashboard?q=${encodeURIComponent(query)}`);
@@ -171,12 +173,13 @@ function NavBar() {
     performSearch(term);
   }
 
-  // [NEW] Mobile Mailbox State
+  // [NEW] Mobile Sidebar (Offcanvas)
+  const [showOffcanvas, setShowOffcanvas] = useState(false);
   const [mobileMailboxes, setMobileMailboxes] = useState<any[]>([]);
 
-  // [NEW] Load Mailboxes for Mobile Menu when expanded
+  // [CHANGED] Load Mailboxes for Mobile Offcanvas when opening sidebar
   useEffect(() => {
-    if (user && isMobile && expand) {
+    if (user && isMobile && showOffcanvas) {
       mailApi.listMailboxes()
         .then((data: any[]) => {
           const filtered = (data || []).map((box: any) => {
@@ -200,13 +203,16 @@ function NavBar() {
         })
         .catch(err => console.error("Nav mailbox fetch error", err));
     }
-  }, [user, isMobile, expand]);
+  }, [user, isMobile, showOffcanvas]);
 
-  // [NEW] Handle Mobile Folder Click
+  // [CHANGED] Mobile folder click closes Offcanvas and navigates
   const handleMobileFolderClick = (folderId: string) => {
-    updateExpanded(false);
+    setShowOffcanvas(false);
     navigate(`/dashboard?folder=${encodeURIComponent(folderId)}`);
   };
+
+  const handleCloseOffcanvas = () => setShowOffcanvas(false);
+  const handleShowOffcanvas = () => setShowOffcanvas(true);
 
   return (
     <Navbar
@@ -216,9 +222,19 @@ function NavBar() {
       className={navColour ? "sticky" : "navbar"}
     >
       <Container>
-        <Navbar.Brand href="/" className="d-flex">
-          {/* [CHANGED] Compact logo on mobile */}
-          <img src={logo} className="img-fluid logo" alt="brand" style={{ height: isMobile ? 24 : 32 }} />
+        {/* [NEW] Hamburger (mobile only) in place of logo */}
+        <Button
+          variant="link"
+          className="d-md-none p-0 me-3 text-white border-0"
+          onClick={handleShowOffcanvas}
+          style={{ fontSize: '1.5rem', lineHeight: 1 }}
+        >
+          <FaBars />
+        </Button>
+
+        {/* [CHANGED] Logo hidden on mobile */}
+        <Navbar.Brand href="/" className="d-none d-md-flex align-items-center">
+          <img src={logo} className="img-fluid logo" alt="brand" />
         </Navbar.Brand>
 
         {/* [CHANGED] Compact search on mobile */}
@@ -290,247 +306,220 @@ function NavBar() {
           </Form>
         )}
 
-        {/* [NEW] Mobile-only avatar next to search (circle only) */}
-        {user && isMobile && (
-          <Dropdown align="end" className="ms-2">
-            <Dropdown.Toggle
-              id="user-dropdown-mobile"
-              variant="light"
-              className="d-flex align-items-center border-0 user-pill-toggle"
-            >
-              {(() => {
-                const email = user?.email ?? '';
-                const name = (user as any)?.name ?? '';
-                const provider = (user as any)?.provider as ('google' | 'email' | undefined);
-                const isGoogle = provider === 'google' || (!!user?.picture && !provider);
-                const displayName = isGoogle ? (name || email) : (name || email);
-                const avatarUrl = user?.picture || user?.avatar;
-                const fallbackInitial = (displayName || '?').charAt(0).toUpperCase();
-                return (
-                  <span className="d-flex align-items-center" style={{ color: '#fff' }}>
-                    {avatarUrl ? (
-                      <Image
-                        src={avatarUrl}
-                        alt="avatar"
-                        roundedCircle
-                        width={28}
-                        height={28}
-                        style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
-                      />
-                    ) : (
-                      <span
-                        aria-label="avatar"
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: '50%',
-                          backgroundColor: 'rgba(255,255,255,0.9)',
-                          color: '#c95bf5',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: 600,
-                          border: '2px solid rgba(255,255,255,0.9)'
-                        }}
-                      >
-                        {fallbackInitial}
-                      </span>
-                    )}
-                  </span>
-                )
-              })()}
-            </Dropdown.Toggle>
-            {/* Same dropdown menu as desktop (account info + Logout) */}
-            <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
-              <Dropdown.Header>
-                {(() => {
-                  const email = user?.email ?? '';
-                  const name = (user as any)?.name ?? '';
-                  const provider = (user as any)?.provider as ('google' | 'email' | undefined);
-                  const isGoogle = provider === 'google' || (!!user?.picture && !provider);
-                  const displayName = isGoogle ? (name || email) : (name || email);
-                  return (
-                    <>
-                      <span className="text-white-50">Signed in as</span>
-                      <div style={{ fontWeight: 600, color: '#fff' }}>{displayName}</div>
-                      {email ? (
-                        <div className="text-white-50" style={{ fontSize: 12 }}>{email}</div>
-                      ) : null}
-                    </>
-                  )
-                })()}
-              </Dropdown.Header>
-              <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
-              <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>
-                <AiOutlineLogout className="logout-icon-blue" style={{ marginBottom: '2px' }} /> <span className="logout-text-blue">Logout</span>
-              </Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown>
+        {/* [CHANGED] Remove mobile avatar Dropdown; use simple avatar to open Offcanvas */}
+        {user && (
+          <div className="d-md-none ms-2" onClick={handleShowOffcanvas} role="button" aria-label="Open menu">
+            {(() => {
+              const avatarUrl = user?.picture || user?.avatar;
+              const displayName = ((user as any)?.name || user?.email || '?');
+              const fallbackInitial = displayName.charAt(0).toUpperCase();
+              return (
+                <span className="d-inline-flex align-items-center justify-content-center" style={{ width: 32, height: 32 }}>
+                  {avatarUrl ? (
+                    <Image
+                      src={avatarUrl}
+                      alt="avatar"
+                      roundedCircle
+                      width={32}
+                      height={32}
+                      style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
+                    />
+                  ) : (
+                    <span
+                      aria-label="avatar"
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(255,255,255,0.9)',
+                        color: '#c95bf5',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 600,
+                        border: '2px solid rgba(255,255,255,0.9)'
+                      }}
+                    >
+                      {fallbackInitial}
+                    </span>
+                  )}
+                </span>
+              )
+            })()}
+          </div>
         )}
 
-        <Navbar.Toggle
-          aria-controls="responsive-navbar-nav"
-          onClick={() => {
-            updateExpanded(!expand);
-          }}
-        >
-          <span></span>
-          <span></span>
-          <span></span>
-        </Navbar.Toggle>
-
-        {/* [CHANGED] Collapse shows folder-column on mobile; desktop unchanged */}
+        {/* [REMOVED on mobile] Navbar.Toggle and mobile Nav links under Collapse */}
+        {/* Keep desktop nav only */}
         <Navbar.Collapse id="responsive-navbar-nav">
-          {isMobile ? (
-            // [CHANGED] Dynamic mobile folders from API
-            <Nav className="w-100" defaultActiveKey="#inbox">
-              {mobileMailboxes.length > 0 ? (
-                mobileMailboxes.map((box) => (
-                  <Nav.Item key={box.id}>
+          <Nav className="ms-auto" defaultActiveKey="#home">
+            {!user ? (
+              initializing ? null : (
+                <>
+                  <Nav.Item>
                     <Nav.Link
-                      as="button"
-                      onClick={() => handleMobileFolderClick(box.id)}
-                      className="d-flex align-items-center bg-transparent border-0"
-                      style={{ cursor: 'pointer' }}
+                      as={Link}
+                      to="/login"
+                      onClick={() => updateExpanded(false)}
                     >
-                      {getIconForFolder(box.id)}
-                      <span className="text-capitalize">{box.name}</span>
+                      <AiOutlineUser style={{ marginBottom: "2px" }} /> Sign in
                     </Nav.Link>
                   </Nav.Item>
-                ))
-              ) : (
-                <>
-                  {/* Fallback to existing static links if API returns empty */}
-                  {/* ...existing code...
-                  <Nav.Item>
-                    <Nav.Link as={Link} to="/dashboard?folder=inbox" onClick={() => updateExpanded(false)}>Inbox</Nav.Link>
-                  </Nav.Item>
-                  <Nav.Item>
-                    <Nav.Link as={Link} to="/dashboard?folder=starred" onClick={() => updateExpanded(false)}>Starred</Nav.Link>
-                  </Nav.Item>
-                  <Nav.Item>
-                    <Nav.Link as={Link} to="/dashboard?folder=sent" onClick={() => updateExpanded(false)}>Sent</Nav.Link>
-                  </Nav.Item>
-                  <Nav.Item>
-                    <Nav.Link as={Link} to="/dashboard?folder=drafts" onClick={() => updateExpanded(false)}>Drafts</Nav.Link>
-                  </Nav.Item>
-                  <Nav.Item>
-                    <Nav.Link as={Link} to="/dashboard?folder=trash" onClick={() => updateExpanded(false)}>Trash</Nav.Link>
-                  </Nav.Item>
-                  ...existing code... */}
-                </>
-              )}
-            </Nav>
-          ) : (
-            <Nav className="ms-auto" defaultActiveKey="#home">
-              {!user ? (
-                initializing ? null : (
-                  <>
-                    <Nav.Item>
-                      <Nav.Link
-                        as={Link}
-                        to="/login"
-                        onClick={() => updateExpanded(false)}
-                      >
-                        <AiOutlineUser style={{ marginBottom: "2px" }} /> Sign in
-                      </Nav.Link>
-                    </Nav.Item>
 
-                    <Nav.Item>
-                      <Nav.Link
-                        as={Link}
-                        to="/signup"
-                        onClick={() => updateExpanded(false)}
-                      >
-                        <ImBlog style={{ marginBottom: "2px" }} /> Sign up
-                      </Nav.Link>
-                    </Nav.Item>
-                  </>
-                )
-              ) : (
-                <Nav.Item className="d-flex align-items-center">
-                  <Dropdown align="end">
-                    <Dropdown.Toggle
-                      id="user-dropdown"
-                      variant="light"
-                      className="d-flex align-items-center border-0 user-pill-toggle"
+                  <Nav.Item>
+                    <Nav.Link
+                      as={Link}
+                      to="/signup"
+                      onClick={() => updateExpanded(false)}
                     >
+                      <ImBlog style={{ marginBottom: "2px" }} /> Sign up
+                    </Nav.Link>
+                  </Nav.Item>
+                </>
+              )
+            ) : (
+              <Nav.Item className="d-flex align-items-center">
+                <Dropdown align="end">
+                  <Dropdown.Toggle
+                    id="user-dropdown"
+                    variant="light"
+                    className="d-flex align-items-center border-0 user-pill-toggle"
+                  >
+                    {(() => {
+                      const email = user?.email ?? ''
+                      const name = (user as any)?.name ?? ''
+                      const provider = (user as any)?.provider as ('google' | 'email' | undefined)
+                      const isGoogle = provider === 'google' || (!!user?.picture && !provider)
+                      const displayName = isGoogle ? (name || email) : (name || email)
+                      const avatarUrl = user?.picture || user?.avatar
+                      const fallbackInitial = (displayName || '?').charAt(0).toUpperCase()
+                      return (
+                        <span className="d-flex align-items-center" style={{ color: '#fff' }}>
+                          {avatarUrl ? (
+                            <Image
+                              src={avatarUrl}
+                              alt="avatar"
+                              roundedCircle
+                              width={isMobile ? 28 : 32}
+                              height={isMobile ? 28 : 32}
+                              style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
+                            />
+                          ) : (
+                            <span
+                              aria-label="avatar"
+                              style={{
+                                width: isMobile ? 28 : 32,
+                                height: isMobile ? 28 : 32,
+                                borderRadius: '50%',
+                                backgroundColor: 'rgba(255,255,255,0.9)',
+                                color: '#c95bf5',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 600,
+                                border: '2px solid rgba(255,255,255,0.9)'
+                              }}
+                            >
+                              {fallbackInitial}
+                            </span>
+                          )}
+                          {/* [CHANGED] Hide display name on mobile */}
+                          <span className="ms-2 d-none d-md-inline" style={{ fontSize: 13 }}>
+                            {displayName}
+                          </span>
+                        </span>
+                      )
+                    })()}
+                  </Dropdown.Toggle>
+                  <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
+                    <Dropdown.Header>
                       {(() => {
                         const email = user?.email ?? ''
                         const name = (user as any)?.name ?? ''
                         const provider = (user as any)?.provider as ('google' | 'email' | undefined)
                         const isGoogle = provider === 'google' || (!!user?.picture && !provider)
                         const displayName = isGoogle ? (name || email) : (name || email)
-                        const avatarUrl = user?.picture || user?.avatar
-                        const fallbackInitial = (displayName || '?').charAt(0).toUpperCase()
                         return (
-                          <span className="d-flex align-items-center" style={{ color: '#fff' }}>
-                            {avatarUrl ? (
-                              <Image
-                                src={avatarUrl}
-                                alt="avatar"
-                                roundedCircle
-                                width={isMobile ? 28 : 32}
-                                height={isMobile ? 28 : 32}
-                                style={{ objectFit: 'cover', border: '2px solid rgba(255,255,255,0.9)' }}
-                              />
-                            ) : (
-                              <span
-                                aria-label="avatar"
-                                style={{
-                                  width: isMobile ? 28 : 32,
-                                  height: isMobile ? 28 : 32,
-                                  borderRadius: '50%',
-                                  backgroundColor: 'rgba(255,255,255,0.9)',
-                                  color: '#c95bf5',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontWeight: 600,
-                                  border: '2px solid rgba(255,255,255,0.9)'
-                                }}
-                              >
-                                {fallbackInitial}
-                              </span>
-                            )}
-                            {/* [CHANGED] Hide display name on mobile */}
-                            <span className="ms-2 d-none d-md-inline" style={{ fontSize: 13 }}>
-                              {displayName}
-                            </span>
-                          </span>
+                          <>
+                            <span className="text-white-50">Signed in as</span>
+                            <div style={{ fontWeight: 600, color: '#fff' }}>{displayName}</div>
+                            {email ? (
+                              <div className="text-white-50" style={{ fontSize: 12 }}>{email}</div>
+                            ) : null}
+                          </>
                         )
                       })()}
-                    </Dropdown.Toggle>
-                    <Dropdown.Menu className="shadow border-0 purple-dropdown-menu">
-                      <Dropdown.Header>
-                        {(() => {
-                          const email = user?.email ?? ''
-                          const name = (user as any)?.name ?? ''
-                          const provider = (user as any)?.provider as ('google' | 'email' | undefined)
-                          const isGoogle = provider === 'google' || (!!user?.picture && !provider)
-                          const displayName = isGoogle ? (name || email) : (name || email)
-                          return (
-                            <>
-                              <span className="text-white-50">Signed in as</span>
-                              <div style={{ fontWeight: 600, color: '#fff' }}>{displayName}</div>
-                              {email ? (
-                                <div className="text-white-50" style={{ fontSize: 12 }}>{email}</div>
-                              ) : null}
-                            </>
-                          )
-                        })()}
-                      </Dropdown.Header>
-                      <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
-                      <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>
-                        <AiOutlineLogout className="logout-icon-blue" style={{ marginBottom: '2px' }} /> <span className="logout-text-blue">Logout</span>
-                      </Dropdown.Item>
-                    </Dropdown.Menu>
-                  </Dropdown>
-                </Nav.Item>
-              )}
-            </Nav>
-          )}
+                    </Dropdown.Header>
+                    <Dropdown.Divider style={{ borderTopColor: 'rgba(255,255,255,0.2)' }} />
+                    <Dropdown.Item className="purple-dropdown-item" onClick={() => { handleLogout(); updateExpanded(false) }}>
+                      <AiOutlineLogout className="logout-icon-blue" style={{ marginBottom: '2px' }} /> <span className="logout-text-blue">Logout</span>
+                    </Dropdown.Item>
+                  </Dropdown.Menu>
+                </Dropdown>
+              </Nav.Item>
+            )}
+          </Nav>
         </Navbar.Collapse>
+
+        {/* [NEW] Offcanvas Sidebar for Mobile */}
+        <Offcanvas
+          show={showOffcanvas}
+          onHide={handleCloseOffcanvas}
+          responsive="md"
+          placement="start"
+          className="mobile-sidebar-offcanvas"
+        >
+          <Offcanvas.Header closeButton closeVariant="white">
+            <Offcanvas.Title>
+              <img src={logo} className="img-fluid" alt="brand" style={{ height: '32px' }} />
+            </Offcanvas.Title>
+          </Offcanvas.Header>
+          <Offcanvas.Body>
+            {user ? (
+              <div className="d-flex flex-column h-100">
+                {/* User Info */}
+                <div className="mobile-user-info mb-3 pb-3 border-bottom border-secondary">
+                  <div className="d-flex align-items-center mb-2">
+                    <span className="text-white fw-bold ps-2">{(user as any)?.name || user.email}</span>
+                  </div>
+                  <div className="small text-white-50 ps-2">{user.email}</div>
+                </div>
+
+                {/* Mailboxes */}
+                <div className="mobile-mailboxes flex-grow-1 overflow-auto">
+                  <div className="mobile-mailbox-section-header">Mailboxes</div>
+                  {mobileMailboxes.map((box) => (
+                    <div
+                      key={box.id}
+                      className="mobile-mailbox-item"
+                      onClick={() => handleMobileFolderClick(box.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {getIconForFolder(box.id)}
+                      <span className="ms-3 text-capitalize">{box.name}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Logout */}
+                <div className="mt-auto pt-3 border-top border-secondary">
+                  <Button variant="link" className="text-danger text-decoration-none px-0" onClick={handleLogout}>
+                    <AiOutlineLogout className="me-2" /> Logout
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Nav className="flex-column">
+                <Nav.Link as={Link} to="/login" onClick={handleCloseOffcanvas} className="text-white py-2">
+                  <AiOutlineUser className="me-2" /> Sign in
+                </Nav.Link>
+                <Nav.Link as={Link} to="/signup" onClick={handleCloseOffcanvas} className="text-white py-2">
+                  <ImBlog className="me-2" /> Sign up
+                </Nav.Link>
+              </Nav>
+            )}
+          </Offcanvas.Body>
+        </Offcanvas>
       </Container>
     </Navbar>
   );
