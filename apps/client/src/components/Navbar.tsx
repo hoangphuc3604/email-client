@@ -24,6 +24,7 @@ import {
 } from "react-icons/ai";
 import useAuthStore from '../store/authStore'
 import { useLogout } from '../hooks/useAuth'
+
 import mailApi from "../api/mail"; // [NEW] Import API
 // [NEW] Folder icons
 import { 
@@ -51,10 +52,14 @@ const getIconForFolder = (id: string) => {
     default: return <FaFolder className="me-2" />;
   }
 };
+import mailApi from "../api/mail";
+import { useSearch } from '../contexts/SearchContext'; // [NEW] Import API
+
 
 function NavBar() {
   const [expand, updateExpanded] = useState(false);
   const [navColour, updateNavbar] = useState(false);
+
 
   // [NEW] Track mobile viewport to adjust UI
   const [isMobile, setIsMobile] = useState<boolean>(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
@@ -65,9 +70,20 @@ function NavBar() {
   }, []);
   
   // Search States
-  const [searchQuery, setSearchQuery] = useState(""); 
+  const [searchQuery, setSearchQuery] = useState("");
   const [suggestions, setSuggestions] = useState<any[]>([]); // [NEW] Store suggestions
   const [showSuggestions, setShowSuggestions] = useState(false); // [NEW] Toggle dropdown
+
+  const { searchResults, lastSearchQuery, setSelectedEmail } = useSearch();
+
+  console.log('Navbar render - searchQuery:', searchQuery, 'showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length);
+
+  // Sync searchQuery with lastSearchQuery for suggestions
+  useEffect(() => {
+    if (lastSearchQuery && !searchQuery) {
+      setSearchQuery(lastSearchQuery);
+    }
+  }, [lastSearchQuery, searchQuery]);
   
   // Ref to handle clicking outside the suggestion box
   const searchContainerRef = useRef<HTMLFormElement>(null);
@@ -123,29 +139,32 @@ function NavBar() {
     navigate('/login')
   }
 
-  // [NEW] Debounced Auto-Suggestion Logic
+  // [NEW] Debounced auto-suggestions from API
   useEffect(() => {
+    console.log('useEffect triggered - searchQuery:', searchQuery);
     const delayDebounceFn = setTimeout(async () => {
-      if (searchQuery.length >= 2) { // Start suggesting after 2 characters
+      console.log('debounce executed - searchQuery:', searchQuery);
+      if (searchQuery.length >= 2) {
         try {
-          // Use Standard Search (Fast Autocomplete) for suggestions
-          // We limit to 5 results for the dropdown
-          const res = await mailApi.searchEmails(searchQuery, undefined, 1, 5);
-          
-          // Handle different response structures (previews array or threads array)
-          const list = (res && res.previews) ? res.previews : (res && Array.isArray(res) ? res : (res && res.threads ? res.threads : []));
-          
+          console.log('calling API for:', searchQuery);
+          const results = await mailApi.searchEmailsSemantic(searchQuery);
+          console.log('API results:', results);
+          const list = Array.isArray(results) ? results : [];
+          console.log('setting suggestions:', list.length, 'items');
           setSuggestions(list);
-          setShowSuggestions(true);
+          setShowSuggestions(list.length > 0);
+          console.log('setShowSuggestions:', list.length > 0);
         } catch (error) {
           console.error("Auto-suggest failed", error);
-          // Don't clear suggestions on error to avoid UI flickering, just stop showing
+          setSuggestions([]);
+          setShowSuggestions(false);
         }
       } else {
+        console.log('clearing suggestions');
         setSuggestions([]);
         setShowSuggestions(false);
       }
-    }, 300); // 300ms debounce
+    }, 300);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
@@ -166,11 +185,45 @@ function NavBar() {
   }
 
   // [NEW] Handle clicking a suggestion
-  const handleSuggestionClick = (email: any) => {
-    // We use the subject as the refined keyword
-    const term = email.subject || "";
-    setSearchQuery(term);
-    performSearch(term);
+  const handleSuggestionClick = async (email: any) => {
+    updateExpanded(false);
+    setShowSuggestions(false);
+
+    try {
+      // Fetch full email data from API
+      const data = await mailApi.getEmail(email.id);
+      const message = data.latest || data.messages?.[0] || data;
+      const senderStr = typeof message.sender === 'string'
+        ? message.sender
+        : (message.sender?.name || message.sender?.email || 'Unknown');
+
+      const actualMessageId = message.id || message.message_id || email.id;
+      const processedHtml = message.processedHtml || message.processed_html || message.body || message.decoded_body || '';
+
+      // Set selected email in global context
+      setSelectedEmail({
+        ...message,
+        id: email.id,
+        messageId: actualMessageId,
+        sender: senderStr,
+        body: processedHtml,
+        subject: message.subject || message.title || '(No Subject)',
+        to: message.to || [],
+        cc: message.cc || [],
+        attachments: message.attachments || []
+      });
+
+      // Mark as read if unread
+      if (email.unread) {
+        try {
+          await mailApi.modifyEmail(email.id, { unread: false });
+        } catch (e) {
+          console.error('Failed to mark email as read:', e);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load email details:', error);
+    }
   }
 
   // [NEW] Mobile Sidebar (Offcanvas)
@@ -254,7 +307,10 @@ function NavBar() {
                 placeholder="Search emails..."
                 className="border-start-0 ps-0"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  console.log('onChange - new value:', e.target.value);
+                  setSearchQuery(e.target.value);
+                }}
                 onKeyDown={handleSearch}
                 onFocus={() => {
                     if (searchQuery.length >= 2 && suggestions.length > 0) setShowSuggestions(true);
@@ -264,29 +320,40 @@ function NavBar() {
             </InputGroup>
 
             {/* [NEW] Type-ahead Suggestions Dropdown */}
-            {showSuggestions && suggestions.length > 0 && (
-              <ListGroup 
-                className="position-absolute w-100 shadow mt-1" 
-                style={{ 
-                    top: '100%', 
-                    zIndex: 1050, 
-                    maxHeight: '300px', 
-                    overflowY: 'auto',
-                    border: '1px solid rgba(0,0,0,0.1)',
-                    borderRadius: '4px'
+            {(() => {
+              const shouldShow = showSuggestions && suggestions.length > 0;
+              console.log('dropdown render check - showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length, 'shouldShow:', shouldShow);
+              return shouldShow;
+            })() && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  zIndex: 9999
                 }}
               >
+                <ListGroup
+                  className="shadow"
+                  style={{
+                      maxHeight: '400px',
+                      overflowY: 'auto',
+                      border: '1px solid rgba(0,0,0,0.1)',
+                      borderRadius: '4px',
+                      backgroundColor: 'white'
+                  }}
+                >
                 {suggestions.map((item: any, idx) => {
-                   // Safe getters for subject and sender
                    const subject = item.subject || "(No Subject)";
-                   const senderName = typeof item.sender === 'string' 
-                        ? item.sender 
+                   const senderName = typeof item.sender === 'string'
+                        ? item.sender
                         : (item.sender?.name || item.sender?.email || "Unknown");
-                   
+
                    return (
-                    <ListGroup.Item 
-                        key={item.id || idx} 
-                        action 
+                    <ListGroup.Item
+                        key={item.id || idx}
+                        action
                         onClick={() => handleSuggestionClick(item)}
                         className="d-flex flex-column border-start-0 border-end-0"
                         style={{ cursor: 'pointer' }}
@@ -301,7 +368,8 @@ function NavBar() {
                     </ListGroup.Item>
                    )
                 })}
-              </ListGroup>
+                </ListGroup>
+              </div>
             )}
           </Form>
         )}

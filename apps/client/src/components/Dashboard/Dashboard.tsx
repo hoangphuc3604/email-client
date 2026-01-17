@@ -41,7 +41,9 @@ import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 import { BsKanban, BsListUl } from 'react-icons/bs'; 
 import { AiOutlineClose } from 'react-icons/ai'; // [Cập nhật] Icon đóng
 import KanbanBoard from './KanbanBoard'; 
-import { useSearchParams } from 'react-router-dom'; // already present
+
+import { useSearchParams } from 'react-router-dom';
+import { useSearch } from '../../contexts/SearchContext'; // [Cập nhật] Hook lấy query param
 
 // Map Gmail label IDs to friendly names
 const LABEL_NAME_MAP: Record<string, string> = {
@@ -67,7 +69,6 @@ function timeAgo(ts: number) {
 
 export default function Dashboard() {
   const [selectedFolder, setSelectedFolder] = useState('inbox')
-  const [selectedEmail, setSelectedEmail] = useState<any | null>(null)
   const [mailboxes, setMailboxes] = useState<any[]>([])
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [previewsMap, setPreviewsMap] = useState<Record<string, any[]>>(() => {
@@ -83,6 +84,13 @@ export default function Dashboard() {
   const [pageTokenMap, setPageTokenMap] = useState<Record<string, string | null>>({})
   const [hasMoreMap, setHasMoreMap] = useState<Record<string, boolean>>({})
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
+  
+  // Pagination states
+  const [currentPageMap, setCurrentPageMap] = useState<Record<string, number>>({})
+  const [pageCacheMap, setPageCacheMap] = useState<Record<string, Record<number, any[]>>>({})
+  const [totalPagesMap, setTotalPagesMap] = useState<Record<string, number>>({})
+  const [pageTokensMap, setPageTokensMap] = useState<Record<string, Record<number, string | null>>>({})
+  const PAGE_SIZE = 20
   const [showCompose, setShowCompose] = useState(false)
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
   const [cursorIndex, setCursorIndex] = useState(0)
@@ -96,6 +104,8 @@ export default function Dashboard() {
   const isDraggingRef = useRef(false)
   const startYRef = useRef(0)
   const scrollStartRef = useRef(0)
+  const pageCacheRef = useRef<Record<string, Record<number, any[]>>>({})
+  const pageTokensRef = useRef<Record<string, Record<number, string | null>>>({})
   const INITIAL_LOAD_COUNT = 20
     
   // Thêm state
@@ -105,9 +115,12 @@ export default function Dashboard() {
   const [autoSyncAttempted, setAutoSyncAttempted] = useState(false); // Track if auto-sync was attempted
   
   // [Cập nhật] Hook xử lý search query
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const searchQuery = searchParams.get('q');
+
   const folderParam = searchParams.get('folder') || undefined; // [NEW] read folder from URL
+
+  const { selectedEmail, setSelectedEmail } = useSearch();
 
   useEffect(() => {
     try {
@@ -117,100 +130,14 @@ export default function Dashboard() {
     }
   }, [previewsMap])
 
-  // [Cập nhật] Logic xử lý khi có search query
-  useEffect(() => {
-    if (searchQuery) {
-      handleSearch(searchQuery);
-    }
-  }, [searchQuery]);
+
 
   // [Cập nhật] Hàm thực hiện tìm kiếm
-  async function handleSearch(query: string, skipAutoSync: boolean = false) {
-    setLoading(true);
-    setError(null); // Reset lỗi cũ
-    try {
-      console.log('[Search] Calling API with query:', query);
-      console.log('[Search] Attempting Semantic Search with query:', query);
-      
-      // 1. Ưu tiên gọi Semantic Search (Tìm kiếm thông minh)
-      let results = await mailApi.searchEmailsSemantic(query);
-      
-      // 2. [QUAN TRỌNG] Logic Fallback: 
-      // Nếu Semantic Search không trả về kết quả nào, ta gọi lại Search cũ (Keyword Search)
-      if (!results || (Array.isArray(results) && results.length === 0)) {
-          console.log('[Search] Semantic search returned 0 results. Falling back to Standard Keyword Search...');
-          results = await mailApi.searchEmails(query);
-      }
-
-      console.log('[Search] Final results:', results);
-      console.log('[Search] Raw API response:', results);
-      console.log('[Search] Is array?', Array.isArray(results));
-      console.log('[Search] Length:', results?.length);
-      
-      // Normalize search results to match preview format
-      const normalizedResults = Array.isArray(results) ? results.map((email: any) => ({
-        ...email,
-        // Convert received_on to timestamp if needed
-        timestamp: email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : (email.received_on ? Date.parse(email.received_on) : Date.now())),
-        // Ensure hasAttachments field exists
-        hasAttachments: email.hasAttachments || email.has_attachments || false,
-        // Normalize preview/body field
-        preview: email.preview || email.body || email.snippet || '',
-      })) : [];
-      
-      console.log('[Search] Normalized results count:', normalizedResults.length);
-      console.log('[Search] Normalized results:', normalizedResults);
-      
-      setPreviewsMap((prev) => ({
-        ...prev,
-        'search_results': normalizedResults
-      }));
-      setSelectedFolder('search_results');
-      setSelectedEmail(null); // Clear any selected email to prevent random opening
-      // Don't force view mode - let user keep their preference
-      setMobileView('list');
-      
-      // Auto-sync if no results and haven't tried syncing yet
-      if (normalizedResults.length === 0 && !autoSyncAttempted && !skipAutoSync) {
-        console.log('[Search] No results found, attempting auto-sync...');
-        setAutoSyncAttempted(true); // Mark that we've attempted sync before starting
-        try {
-          await mailApi.syncEmailIndex(90, 5);
-          console.log('[Search] Auto-sync completed, waiting for index to be ready...');
-          // Wait a bit for MongoDB index to commit before re-searching
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          console.log('[Search] Re-searching...');
-          // Re-run search after sync, but skip auto-sync to prevent infinite loop
-          // Don't set loading to false yet - keep it true for the re-search
-          await handleSearch(query, true);
-          return; // Exit early to avoid setting loading to false
-        } catch (syncError: any) {
-          console.error('[Search] Auto-sync failed:', syncError);
-          setError(`No results found. Auto-sync failed: ${syncError.response?.data?.detail || syncError.message}`);
-        }
-      } else if (normalizedResults.length === 0) {
-        console.warn('[Search] No results found for query:', query);
-      }
-    } catch (e: any) {
-      console.error("[Search] Failed:", e);
-      console.error("[Search] Error details:", e.response?.data);
-      setError(`Failed to search emails: ${e.response?.data?.detail || e.message || 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // [Cập nhật] Hàm xóa tìm kiếm và quay về Inbox
-  function clearSearch() {
-    setSearchParams({}); // Xóa query param trên URL
-    setAutoSyncAttempted(false); // Reset auto-sync flag for next search
-    selectFolder('inbox');
-  }
 
   const displayList = useMemo(() => {
-    let list = previewsMap[selectedFolder] || []
-    
-    console.log(`[displayList] folder: ${selectedFolder}, raw list:`, list); // Debug log
+    // For paginated view, get only the current page from cache
+    const currentPage = currentPageMap[selectedFolder] || 1
+    let list = pageCacheMap[selectedFolder]?.[currentPage] || []
 
     // 1. FILTERING (Lọc)
     if (filterMode === 'unread') {
@@ -240,9 +167,9 @@ export default function Dashboard() {
       }
     })
 
-    console.log(`[displayList] after filter/sort:`, list); // Debug log
     return list
-  }, [previewsMap, selectedFolder, filterMode, sortMode]) // Quan trọng: Phải có dependencies này
+  }, [pageCacheMap, selectedFolder, currentPageMap, filterMode, sortMode]) // Updated dependencies
+
 
   useEffect(() => {
     if (loadingMore === false && scrollTopRef.current > 0 && listRef.current) {
@@ -256,9 +183,14 @@ export default function Dashboard() {
   }, [loadingMore, displayList.length])
 
   const unreadInboxCount = useMemo(() => {
-    const inboxPreviews = previewsMap['inbox'] || []
-    return inboxPreviews.filter((e: any) => e.unread === true).length
-  }, [previewsMap])
+    // Count unread emails across all cached pages for inbox
+    const inboxCache = pageCacheMap['inbox'] || {}
+    let unreadCount = 0
+    Object.values(inboxCache).forEach((pageData: any[]) => {
+      unreadCount += pageData.filter((e: any) => e.unread === true).length
+    })
+    return unreadCount
+  }, [pageCacheMap])
 
   // [NEW] Sync folder from URL (?folder=...) triggered from Navbar
   useEffect(() => {
@@ -268,6 +200,7 @@ export default function Dashboard() {
   }, [folderParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function selectFolder(id: string) {
+
     // [CHANGED] Keep URL in sync when switching folder (except search_results)
     if (id !== 'search_results') {
       setSearchParams({ folder: id });
@@ -282,6 +215,9 @@ export default function Dashboard() {
     setError(null)
     setLoadingMore(false)
 
+    // Initialize current page to 1 FIRST, before any loading
+    setCurrentPageMap(prev => ({ ...prev, [id]: 1 }))
+
     // Reset scroll position for new folder
     if (listRef.current) {
       listRef.current.scrollTop = 0
@@ -289,23 +225,36 @@ export default function Dashboard() {
     }
 
     if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
-      loadFolderData(id, true)
+      loadFolderData(id, 1)
     }
   }
 
-  async function loadFolderData(folderId: string, isInitial: boolean = false) {
-    if (folderId === 'search_results') return; // Bỏ qua nếu là search results
-
-    if (isInitial) {
-      setLoadingFolders(prev => new Set([...prev, folderId]))
-    } else {
-      setLoadingMore(true)
-      if (listRef.current) {
-        scrollTopRef.current = listRef.current.scrollTop
+  async function loadFolderData(folderId: string, pageNum: number) {
+    // Check if page is already cached using ref for immediate access
+    console.log(`loadFolderData called for ${folderId} page ${pageNum}`)
+    console.log(`Current cache:`, pageCacheRef.current)
+    const cachedPage = pageCacheRef.current[folderId]?.[pageNum]
+    console.log(`Cached page data:`, cachedPage)
+    
+    if (cachedPage && cachedPage.length > 0) {
+      console.log(`✓ Using cached page ${pageNum} for ${folderId}`)
+      setCurrentPageMap(prev => ({ ...prev, [folderId]: pageNum }))
+      // Pre-fetch next page if not cached
+      const nextPage = pageNum + 1
+      const nextPageToken = pageTokensRef.current[folderId]?.[pageNum]
+      if (nextPageToken && !pageCacheRef.current[folderId]?.[nextPage]) {
+        loadPageInBackground(folderId, nextPage, nextPageToken)
       }
+      return
     }
+
+    console.log(`✗ Cache miss - loading page ${pageNum} for ${folderId}`)
+    // Set current page immediately before loading
+    setCurrentPageMap(prev => ({ ...prev, [folderId]: pageNum }))
+    setLoadingFolders(prev => new Set([...prev, folderId]))
     
     try {
+
       const pageToken = isInitial ? null : pageTokenMap[folderId]
       const res = await mailApi.listEmails(folderId, INITIAL_LOAD_COUNT, pageToken || undefined)
       // Lấy danh sách email từ response
@@ -335,72 +284,175 @@ export default function Dashboard() {
       }
       // -----------------------
 
+      // Get page token for this page (null for page 1)
+      const pageToken = pageNum === 1 ? null : pageTokensRef.current[folderId]?.[pageNum - 1]
+      const res = await mailApi.listEmails(folderId, PAGE_SIZE, pageToken || undefined)
+      const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+
       const nextPageToken = res?.next_page_token || res?.nextPageToken
       
-      setPreviewsMap((prev) => ({
-        ...prev,
-        [folderId]: isInitial ? previews : [...(prev[folderId] || []), ...previews]
-      }))
+      // Cache the page data
+      setPageCacheMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: previews
+          }
+        }
+        pageCacheRef.current = updated // Update ref
+        return updated
+      })
       
-      setPageTokenMap((prev) => ({
-        ...prev,
-        [folderId]: nextPageToken || null
-      }))
+      // Store the token for the next page
+      setPageTokensMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: nextPageToken || null
+          }
+        }
+        pageTokensRef.current = updated // Update ref
+        return updated
+      })
       
-      setHasMoreMap((prev) => ({
-        ...prev,
-        [folderId]: !!nextPageToken
-      }))
+      // Update total pages if we know there's more
+      if (nextPageToken) {
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: Math.max(prev[folderId] || 0, pageNum + 1)
+        }))
+      } else {
+        // This is the last page
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: pageNum
+        }))
+      }
       
+      setCurrentPageMap(prev => ({ ...prev, [folderId]: pageNum }))
       setLoadedFolders((prev) => new Set([...prev, folderId]))
       setFoldersNeedReload((prev) => {
         const updated = new Set(prev)
         updated.delete(folderId)
         return updated
       })
+
+      // Pre-fetch next page in background if available
+      if (nextPageToken) {
+        loadPageInBackground(folderId, pageNum + 1, nextPageToken)
+      }
     } catch (e: any) {
-      console.error(`Error loading folder ${folderId}:`, e)
-      if (isInitial) {
-        setError(`Failed to load ${folderId} emails: ${e.message || 'Unknown error'}`)
-        setLoadingFolders(prev => {
-          const updated = new Set(prev)
-          updated.delete(folderId)
-          return updated
-        })
-      }
+      console.error(`Error loading folder ${folderId} page ${pageNum}:`, e)
+      setError(`Failed to load ${folderId} emails: ${e.message || 'Unknown error'}`)
     } finally {
-      if (isInitial) {
-        setLoadingFolders(prev => {
-          const updated = new Set(prev)
-          updated.delete(folderId)
-          return updated
-        })
+      setLoadingFolders(prev => {
+        const updated = new Set(prev)
+        updated.delete(folderId)
+        return updated
+      })
+    }
+  }
+
+  async function loadPageInBackground(folderId: string, pageNum: number, pageToken: string) {
+    // Don't load if already cached (use ref for immediate check)
+    if (pageCacheRef.current[folderId]?.[pageNum]) {
+      return
+    }
+
+    try {
+      console.log(`Pre-fetching page ${pageNum} for ${folderId}`)
+      const res = await mailApi.listEmails(folderId, PAGE_SIZE, pageToken)
+      const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+      const nextPageToken = res?.next_page_token || res?.nextPageToken
+      
+      // Cache the page data
+      setPageCacheMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: previews
+          }
+        }
+        pageCacheRef.current = updated // Update ref
+        return updated
+      })
+      
+      // Store the token for the next page
+      setPageTokensMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: nextPageToken || null
+          }
+        }
+        pageTokensRef.current = updated // Update ref
+        return updated
+      })
+
+      // Update total pages
+      if (nextPageToken) {
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: Math.max(prev[folderId] || 0, pageNum + 1)
+        }))
       } else {
-        setLoadingMore(false)
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: pageNum
+        }))
       }
+    } catch (e: any) {
+      console.error(`Error pre-fetching page ${pageNum} for ${folderId}:`, e)
     }
   }
 
-  function loadMoreEmails() {
-    // Không load more cho search results (trừ khi API search hỗ trợ phân trang)
-    if (selectedFolder === 'search_results') return;
+  // Helper function to update email in all cache pages
+  function updateEmailInCache(emailId: string, updateFn: (email: any) => any) {
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      Object.keys(updated).forEach(folder => {
+        const folderCache = updated[folder]
+        Object.keys(folderCache).forEach(pageNum => {
+          folderCache[pageNum] = folderCache[pageNum].map((e: any) => 
+            e.id === emailId ? updateFn(e) : e
+          )
+        })
+      })
+      return updated
+    })
+  }
 
-    const hasMore = hasMoreMap[selectedFolder]
-    if (hasMore && !loadingMore) {
-      loadFolderData(selectedFolder, false)
+  // Helper function to remove email from all cache pages
+  function removeEmailFromCache(emailId: string) {
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      Object.keys(updated).forEach(folder => {
+        const folderCache = updated[folder]
+        Object.keys(folderCache).forEach(pageNum => {
+          folderCache[pageNum] = folderCache[pageNum].filter((e: any) => e.id !== emailId)
+        })
+      })
+      return updated
+    })
+  }
+
+  // Pagination navigation functions
+  function goToNextPage() {
+    const currentPage = currentPageMap[selectedFolder] || 1
+    const totalPages = totalPagesMap[selectedFolder] || 1
+    if (currentPage < totalPages) {
+      loadFolderData(selectedFolder, currentPage + 1)
     }
   }
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget
-    const scrollPosition = target.scrollTop + target.clientHeight
-    const scrollHeight = target.scrollHeight
-    
-    if (scrollPosition >= scrollHeight * 0.8 && !loadingMore && !loading) {
-      const hasMore = hasMoreMap[selectedFolder]
-      if (hasMore) {
-        loadMoreEmails()
-      }
+  function goToPreviousPage() {
+    const currentPage = currentPageMap[selectedFolder] || 1
+    if (currentPage > 1) {
+      loadFolderData(selectedFolder, currentPage - 1)
     }
   }
 
@@ -496,7 +548,7 @@ export default function Dashboard() {
       // [CHANGED] Only auto-load Inbox when no search and no folder param
       if (!searchQuery && !searchParams.get('folder')) {
         const inboxId = 'inbox'
-        await loadFolderData(inboxId, true)
+        await loadFolderData(inboxId, 1)
       }
     } catch (e) {
       console.error('Error loading mailboxes:', e)
@@ -521,19 +573,6 @@ export default function Dashboard() {
       const processedHtml = message.processedHtml || message.processed_html || message.body || message.decoded_body || ''
       
       // Log email HTML content for debugging
-      console.log('=== EMAIL HTML DEBUG ===')
-      console.log('Email ID:', email.id)
-      console.log('Subject:', message.subject || message.title || '(No Subject)')
-      console.log('From:', senderStr)
-      console.log('Full message object keys:', Object.keys(message))
-      console.log('Has processedHtml (camelCase):', !!message.processedHtml)
-      console.log('Has processed_html (snake_case):', !!message.processed_html)
-      console.log('Has body:', !!message.body)
-      console.log('Has decoded_body:', !!message.decoded_body)
-      console.log('Processed HTML Length:', processedHtml.length)
-      console.log('Processed HTML Content (first 500 chars):', processedHtml.substring(0, 500))
-      console.log('Full message:', message)
-      console.log('========================')
       
       setSelectedEmail({
         ...message,
@@ -569,6 +608,10 @@ export default function Dashboard() {
       setLoadingEmail(false)
     }
     
+    // Update email as read in cache
+    updateEmailInCache(email.id, (e: any) => ({ ...e, unread: false, read: true }))
+    
+    // Also update previewsMap for backwards compatibility
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       Object.keys(updated).forEach(folder => {
@@ -611,6 +654,10 @@ export default function Dashboard() {
     if (ids.size === 0) return
     
     if (selectedFolder === 'trash') {
+      // Remove from cache
+      ids.forEach(id => removeEmailFromCache(id))
+      
+      // Also update previewsMap for backwards compatibility
       setPreviewsMap((prev) => {
         const updated = { ...prev }
         Object.keys(updated).forEach(folder => {
@@ -631,6 +678,35 @@ export default function Dashboard() {
     
     Promise.all(promises).catch(() => {})
     
+    // Update cache
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      const movedEmails: any[] = []
+      
+      Object.keys(updated).forEach(folder => {
+        const folderCache = updated[folder]
+        Object.keys(folderCache || {}).forEach(pageNum => {
+          const emails = folderCache[pageNum]
+          const remaining: any[] = []
+          emails.forEach((e: any) => {
+            if (ids.has(String(e.id))) {
+              movedEmails.push({ ...e, labels: ['trash'] })
+            } else {
+              remaining.push(e)
+            }
+          })
+          folderCache[pageNum] = remaining
+        })
+      })
+      
+      // Add to trash cache (page 1)
+      if (!updated['trash']) updated['trash'] = {}
+      updated['trash'][1] = [...(updated['trash'][1] || []), ...movedEmails]
+      
+      return updated
+    })
+    
+    // Also update previewsMap for backwards compatibility
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       const movedEmails: any[] = []
@@ -696,6 +772,8 @@ export default function Dashboard() {
     const emailId = String(selectedEmail.id)
 
     if (selectedFolder === 'trash') {
+      removeEmailFromCache(emailId)
+      
       setPreviewsMap((prev) => {
         const updated = { ...prev }
         Object.keys(updated).forEach(folder => {
@@ -713,6 +791,45 @@ export default function Dashboard() {
       mailApi.modifyEmail(emailId, { labels: ['trash'] }).catch(() => {})
     } catch (e) {}
 
+    // Update cache
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+
+      if (selectedFolder === 'drafts' || (selectedEmail.tags && selectedEmail.tags.some((tag: any) => tag.id === 'DRAFT'))) {
+        // For draft folder, just remove the email from cache
+        if (updated[selectedFolder]) {
+          Object.keys(updated[selectedFolder]).forEach(pageNum => {
+            updated[selectedFolder][pageNum] = updated[selectedFolder][pageNum].filter((e: any) => String(e.id) !== emailId)
+          })
+        }
+      } else {
+        // For other folders, move to trash
+        const movedEmails: any[] = []
+
+        Object.keys(updated).forEach(folder => {
+          const folderCache = updated[folder] || {}
+          Object.keys(folderCache).forEach(pageNum => {
+            const emails = folderCache[pageNum] || []
+            const remaining: any[] = []
+            emails.forEach((e: any) => {
+              if (String(e.id) === emailId) {
+                movedEmails.push({ ...e, labels: ['trash'] })
+              } else {
+                remaining.push(e)
+              }
+            })
+            folderCache[pageNum] = remaining
+          })
+        })
+
+        if (!updated['trash']) updated['trash'] = {}
+        updated['trash'][1] = [...(updated['trash'][1] || []), ...movedEmails]
+      }
+
+      return updated
+    })
+
+    // Also update previewsMap for backwards compatibility
     setPreviewsMap((prev) => {
       const updated = { ...prev }
 
@@ -815,6 +932,7 @@ export default function Dashboard() {
 
     // 2. Gọi API để đồng bộ với Server và Gmail thật
     try {
+
       await mailApi.modifyEmail(email.id, { starred: !isStarred });
       
       // Nếu folder hiện tại là 'starred' và ta vừa bỏ star, thì mới cần load lại để nó biến mất
@@ -822,6 +940,8 @@ export default function Dashboard() {
          // Đợi một chút cho hiệu ứng click xong rồi mới refresh
          setTimeout(() => refreshFolder(), 300);
       }
+      await mailApi.modifyEmail(email.id, { starred: !hasStar })
+      await refreshFolder()
     } catch (e) {
       console.error('Failed to toggle star on backend:', e);
       // Nếu lỗi thì có thể revert lại state (tùy chọn), nhưng thường user sẽ thử lại
@@ -830,18 +950,25 @@ export default function Dashboard() {
   }
   
   async function refreshFolder() {
-    if (selectedFolder === 'search_results') {
-        if (searchQuery) handleSearch(searchQuery);
-        return;
-    }
     setSelectedEmail(null)
     setSelectedIds({})
     setMobileView('list')
-    setPageTokenMap((prev) => ({
-      ...prev,
-      [selectedFolder]: null
-    }))
-    await loadFolderData(selectedFolder, true)
+    
+    // Clear cache for current folder
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      delete updated[selectedFolder]
+      return updated
+    })
+    
+    setPageTokensMap((prev) => {
+      const updated = { ...prev }
+      delete updated[selectedFolder]
+      return updated
+    })
+    
+    setCurrentPageMap(prev => ({ ...prev, [selectedFolder]: 1 }))
+    await loadFolderData(selectedFolder, 1)
   }
 
   const [composeTo, setComposeTo] = useState('')
@@ -1327,7 +1454,7 @@ export default function Dashboard() {
                 <>
                   <div className="email-list-actions d-flex align-items-center justify-content-between mb-2">
                     <h5 className="m-0 text-white">
-                      {selectedFolder === 'search_results' ? `Search Results: "${searchQuery}"` : 'Project Board'}
+                      Project Board
                     </h5>
                     <Button 
                       variant="outline-info" 
@@ -1340,7 +1467,6 @@ export default function Dashboard() {
                   <div className="flex-grow-1" style={{ overflow: 'auto', height: '100%' }}>
                     <KanbanBoard 
                       onOpenEmail={(email) => openEmail(email)} 
-                      searchResults={selectedFolder === 'search_results' ? displayList : undefined}
                     />
                   </div>
                 </>
@@ -1354,12 +1480,6 @@ export default function Dashboard() {
             className={`email-list-column ${mobileView === 'detail' ? 'd-none d-md-flex' : 'd-flex'}`}
           >
              {/* [Cập nhật] Header cho trang kết quả tìm kiếm */}
-             {selectedFolder === 'search_results' && (
-                <div className="alert alert-info py-2 px-3 mb-2 d-flex justify-content-between align-items-center">
-                   <small className="text-truncate" style={{maxWidth: '200px'}}>Results for: <strong>{searchQuery}</strong></small>
-                   <Button variant="outline-info" size="sm" onClick={clearSearch}>Clear</Button>
-                </div>
-              )}
 
             <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Switch View</Tooltip>}>
@@ -1435,7 +1555,6 @@ export default function Dashboard() {
             <div
               className="email-list"
               ref={listRef}
-              onScroll={handleScroll}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
@@ -1483,6 +1602,7 @@ export default function Dashboard() {
                           action
                           className={`email-row d-flex align-items-start ${isRead ? 'read' : 'unread'} ${cursorIndex === idx ? 'cursor' : ''}`}
                           onClick={(e) => {
+                            e.preventDefault()
                             if (isDraggingRef.current && Math.abs(startYRef.current - e.clientY) > 5) {
                               return
                             }
@@ -1506,7 +1626,7 @@ export default function Dashboard() {
                               <div className="time">{timeAgo(ts)}</div>
                             </div>
                             <div className="subject">{subject}</div>
-                            <div className="preview">{preview}</div>
+                            <div className="preview" style={{ userSelect: 'none' }}>{preview}</div>
                           </div>
                         </ListGroup.Item>
                       )
@@ -1514,15 +1634,28 @@ export default function Dashboard() {
                   </ListGroup>
                 )}
                 
-                {loadingMore && (
-                  <div className="text-center p-3">
-                    <FaSync className="fa-spin" size={20} />
-                    <small className="ms-2">Loading more...</small>
-                  </div>
-                )}
-                {!loadingMore && hasMoreMap[selectedFolder] && selectedFolder !== 'search_results' && (
-                  <div className="text-center p-3">
-                    <small className="text-muted">Scroll down for more emails</small>
+                {/* Pagination Controls */}
+                {selectedFolder !== 'search_results' && displayList.length > 0 && (
+                  <div className="pagination-controls d-flex justify-content-between align-items-center p-3 border-top">
+                    <Button 
+                      variant="outline-light" 
+                      size="sm"
+                      disabled={!currentPageMap[selectedFolder] || currentPageMap[selectedFolder] <= 1}
+                      onClick={goToPreviousPage}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-white small">
+                      Page {currentPageMap[selectedFolder] || 1}
+                    </span>
+                    <Button 
+                      variant="outline-light" 
+                      size="sm"
+                      disabled={!currentPageMap[selectedFolder] || currentPageMap[selectedFolder] >= (totalPagesMap[selectedFolder] || 1)}
+                      onClick={goToNextPage}
+                    >
+                      Next
+                    </Button>
                   </div>
                 )}
               </>

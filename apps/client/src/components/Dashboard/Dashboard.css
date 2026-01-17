@@ -467,4 +467,20 @@ div[style*="overflow: auto"]::-webkit-scrollbar-thumb:hover {
     padding: 55px 0 0 0 !important; /* Sát lề, chừa chỗ cho Navbar */
     overflow-x: hidden;
   }
+/* Pagination Controls */
+.pagination-controls {
+  background: linear-gradient(180deg, rgba(27,26,46,0.9), rgba(27,26,46,0.95));
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+
+.pagination-controls .btn {
+  min-width: 80px;
+}
+
+.pagination-controls .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
