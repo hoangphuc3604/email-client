@@ -83,6 +83,13 @@ export default function Dashboard() {
   const [pageTokenMap, setPageTokenMap] = useState<Record<string, string | null>>({})
   const [hasMoreMap, setHasMoreMap] = useState<Record<string, boolean>>({})
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
+  
+  // Pagination states
+  const [currentPageMap, setCurrentPageMap] = useState<Record<string, number>>({})
+  const [pageCacheMap, setPageCacheMap] = useState<Record<string, Record<number, any[]>>>({})
+  const [totalPagesMap, setTotalPagesMap] = useState<Record<string, number>>({})
+  const [pageTokensMap, setPageTokensMap] = useState<Record<string, Record<number, string | null>>>({})
+  const PAGE_SIZE = 20
   const [showCompose, setShowCompose] = useState(false)
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
   const [cursorIndex, setCursorIndex] = useState(0)
@@ -96,6 +103,8 @@ export default function Dashboard() {
   const isDraggingRef = useRef(false)
   const startYRef = useRef(0)
   const scrollStartRef = useRef(0)
+  const pageCacheRef = useRef<Record<string, Record<number, any[]>>>({})
+  const pageTokensRef = useRef<Record<string, Record<number, string | null>>>({})
   const INITIAL_LOAD_COUNT = 20
     
   // Thêm state
@@ -122,8 +131,9 @@ export default function Dashboard() {
   // [Cập nhật] Hàm thực hiện tìm kiếm
 
   const displayList = useMemo(() => {
-    let list = previewsMap[selectedFolder] || []
-
+    // For paginated view, get only the current page from cache
+    const currentPage = currentPageMap[selectedFolder] || 1
+    let list = pageCacheMap[selectedFolder]?.[currentPage] || []
 
     // 1. FILTERING (Lọc)
     if (filterMode === 'unread') {
@@ -154,7 +164,7 @@ export default function Dashboard() {
     })
 
     return list
-  }, [previewsMap, selectedFolder, filterMode, sortMode, searchQuery]) // Quan trọng: Phải có dependencies này
+  }, [pageCacheMap, selectedFolder, currentPageMap, filterMode, sortMode]) // Updated dependencies
 
 
   useEffect(() => {
@@ -169,9 +179,14 @@ export default function Dashboard() {
   }, [loadingMore, displayList.length])
 
   const unreadInboxCount = useMemo(() => {
-    const inboxPreviews = previewsMap['inbox'] || []
-    return inboxPreviews.filter((e: any) => e.unread === true).length
-  }, [previewsMap])
+    // Count unread emails across all cached pages for inbox
+    const inboxCache = pageCacheMap['inbox'] || {}
+    let unreadCount = 0
+    Object.values(inboxCache).forEach((pageData: any[]) => {
+      unreadCount += pageData.filter((e: any) => e.unread === true).length
+    })
+    return unreadCount
+  }, [pageCacheMap])
 
   function selectFolder(id: string) {
 
@@ -184,6 +199,9 @@ export default function Dashboard() {
     setError(null) // Clear any previous errors
     setLoadingMore(false) // Reset loading more state
 
+    // Initialize current page to 1 FIRST, before any loading
+    setCurrentPageMap(prev => ({ ...prev, [id]: 1 }))
+
     // Reset scroll position for new folder
     if (listRef.current) {
       listRef.current.scrollTop = 0
@@ -192,89 +210,203 @@ export default function Dashboard() {
 
     // Không load lại nếu là folder search_results (vì dữ liệu lấy từ API search)
     if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
-      loadFolderData(id, true)
+      loadFolderData(id, 1)
     }
   }
 
-  async function loadFolderData(folderId: string, isInitial: boolean = false) {
-
-    if (isInitial) {
-      setLoadingFolders(prev => new Set([...prev, folderId]))
-    } else {
-      setLoadingMore(true)
-      if (listRef.current) {
-        scrollTopRef.current = listRef.current.scrollTop
+  async function loadFolderData(folderId: string, pageNum: number) {
+    // Check if page is already cached using ref for immediate access
+    console.log(`loadFolderData called for ${folderId} page ${pageNum}`)
+    console.log(`Current cache:`, pageCacheRef.current)
+    const cachedPage = pageCacheRef.current[folderId]?.[pageNum]
+    console.log(`Cached page data:`, cachedPage)
+    
+    if (cachedPage && cachedPage.length > 0) {
+      console.log(`✓ Using cached page ${pageNum} for ${folderId}`)
+      setCurrentPageMap(prev => ({ ...prev, [folderId]: pageNum }))
+      // Pre-fetch next page if not cached
+      const nextPage = pageNum + 1
+      const nextPageToken = pageTokensRef.current[folderId]?.[pageNum]
+      if (nextPageToken && !pageCacheRef.current[folderId]?.[nextPage]) {
+        loadPageInBackground(folderId, nextPage, nextPageToken)
       }
+      return
     }
+
+    console.log(`✗ Cache miss - loading page ${pageNum} for ${folderId}`)
+    // Set current page immediately before loading
+    setCurrentPageMap(prev => ({ ...prev, [folderId]: pageNum }))
+    setLoadingFolders(prev => new Set([...prev, folderId]))
     
     try {
-      const pageToken = isInitial ? null : pageTokenMap[folderId]
-      const res = await mailApi.listEmails(folderId, INITIAL_LOAD_COUNT, pageToken || undefined)
+      // Get page token for this page (null for page 1)
+      const pageToken = pageNum === 1 ? null : pageTokensRef.current[folderId]?.[pageNum - 1]
+      const res = await mailApi.listEmails(folderId, PAGE_SIZE, pageToken || undefined)
       const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
       const nextPageToken = res?.next_page_token || res?.nextPageToken
       
-      setPreviewsMap((prev) => ({
-        ...prev,
-        [folderId]: isInitial ? previews : [...(prev[folderId] || []), ...previews]
-      }))
+      // Cache the page data
+      setPageCacheMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: previews
+          }
+        }
+        pageCacheRef.current = updated // Update ref
+        return updated
+      })
       
-      setPageTokenMap((prev) => ({
-        ...prev,
-        [folderId]: nextPageToken || null
-      }))
+      // Store the token for the next page
+      setPageTokensMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: nextPageToken || null
+          }
+        }
+        pageTokensRef.current = updated // Update ref
+        return updated
+      })
       
-      setHasMoreMap((prev) => ({
-        ...prev,
-        [folderId]: !!nextPageToken
-      }))
+      // Update total pages if we know there's more
+      if (nextPageToken) {
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: Math.max(prev[folderId] || 0, pageNum + 1)
+        }))
+      } else {
+        // This is the last page
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: pageNum
+        }))
+      }
       
+      setCurrentPageMap(prev => ({ ...prev, [folderId]: pageNum }))
       setLoadedFolders((prev) => new Set([...prev, folderId]))
       setFoldersNeedReload((prev) => {
         const updated = new Set(prev)
         updated.delete(folderId)
         return updated
       })
+
+      // Pre-fetch next page in background if available
+      if (nextPageToken) {
+        loadPageInBackground(folderId, pageNum + 1, nextPageToken)
+      }
     } catch (e: any) {
-      console.error(`Error loading folder ${folderId}:`, e)
-      if (isInitial) {
-        setError(`Failed to load ${folderId} emails: ${e.message || 'Unknown error'}`)
-        setLoadingFolders(prev => {
-          const updated = new Set(prev)
-          updated.delete(folderId)
-          return updated
-        })
-      }
+      console.error(`Error loading folder ${folderId} page ${pageNum}:`, e)
+      setError(`Failed to load ${folderId} emails: ${e.message || 'Unknown error'}`)
     } finally {
-      if (isInitial) {
-        setLoadingFolders(prev => {
-          const updated = new Set(prev)
-          updated.delete(folderId)
-          return updated
-        })
+      setLoadingFolders(prev => {
+        const updated = new Set(prev)
+        updated.delete(folderId)
+        return updated
+      })
+    }
+  }
+
+  async function loadPageInBackground(folderId: string, pageNum: number, pageToken: string) {
+    // Don't load if already cached (use ref for immediate check)
+    if (pageCacheRef.current[folderId]?.[pageNum]) {
+      return
+    }
+
+    try {
+      console.log(`Pre-fetching page ${pageNum} for ${folderId}`)
+      const res = await mailApi.listEmails(folderId, PAGE_SIZE, pageToken)
+      const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+      const nextPageToken = res?.next_page_token || res?.nextPageToken
+      
+      // Cache the page data
+      setPageCacheMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: previews
+          }
+        }
+        pageCacheRef.current = updated // Update ref
+        return updated
+      })
+      
+      // Store the token for the next page
+      setPageTokensMap((prev) => {
+        const updated = {
+          ...prev,
+          [folderId]: {
+            ...(prev[folderId] || {}),
+            [pageNum]: nextPageToken || null
+          }
+        }
+        pageTokensRef.current = updated // Update ref
+        return updated
+      })
+
+      // Update total pages
+      if (nextPageToken) {
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: Math.max(prev[folderId] || 0, pageNum + 1)
+        }))
       } else {
-        setLoadingMore(false)
+        setTotalPagesMap((prev) => ({
+          ...prev,
+          [folderId]: pageNum
+        }))
       }
+    } catch (e: any) {
+      console.error(`Error pre-fetching page ${pageNum} for ${folderId}:`, e)
     }
   }
 
-  function loadMoreEmails() {
+  // Helper function to update email in all cache pages
+  function updateEmailInCache(emailId: string, updateFn: (email: any) => any) {
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      Object.keys(updated).forEach(folder => {
+        const folderCache = updated[folder]
+        Object.keys(folderCache).forEach(pageNum => {
+          folderCache[pageNum] = folderCache[pageNum].map((e: any) => 
+            e.id === emailId ? updateFn(e) : e
+          )
+        })
+      })
+      return updated
+    })
+  }
 
-    const hasMore = hasMoreMap[selectedFolder]
-    if (hasMore && !loadingMore) {
-      loadFolderData(selectedFolder, false)
+  // Helper function to remove email from all cache pages
+  function removeEmailFromCache(emailId: string) {
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      Object.keys(updated).forEach(folder => {
+        const folderCache = updated[folder]
+        Object.keys(folderCache).forEach(pageNum => {
+          folderCache[pageNum] = folderCache[pageNum].filter((e: any) => e.id !== emailId)
+        })
+      })
+      return updated
+    })
+  }
+
+  // Pagination navigation functions
+  function goToNextPage() {
+    const currentPage = currentPageMap[selectedFolder] || 1
+    const totalPages = totalPagesMap[selectedFolder] || 1
+    if (currentPage < totalPages) {
+      loadFolderData(selectedFolder, currentPage + 1)
     }
   }
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget
-    const scrollPosition = target.scrollTop + target.clientHeight
-    const scrollHeight = target.scrollHeight
-    
-    if (scrollPosition >= scrollHeight * 0.8 && !loadingMore && !loading) {
-      const hasMore = hasMoreMap[selectedFolder]
-      if (hasMore) {
-        loadMoreEmails()
-      }
+  function goToPreviousPage() {
+    const currentPage = currentPageMap[selectedFolder] || 1
+    if (currentPage > 1) {
+      loadFolderData(selectedFolder, currentPage - 1)
     }
   }
 
@@ -370,7 +502,7 @@ export default function Dashboard() {
       // Nếu có query search thì không load inbox mặc định để tránh ghi đè UI
       if (!searchQuery) {
         const inboxId = 'inbox'
-        await loadFolderData(inboxId, true)
+        await loadFolderData(inboxId, 1)
       }
     } catch (e) {
       console.error('Error loading mailboxes:', e)
@@ -430,6 +562,10 @@ export default function Dashboard() {
       setLoadingEmail(false)
     }
     
+    // Update email as read in cache
+    updateEmailInCache(email.id, (e: any) => ({ ...e, unread: false, read: true }))
+    
+    // Also update previewsMap for backwards compatibility
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       Object.keys(updated).forEach(folder => {
@@ -472,6 +608,10 @@ export default function Dashboard() {
     if (ids.size === 0) return
     
     if (selectedFolder === 'trash') {
+      // Remove from cache
+      ids.forEach(id => removeEmailFromCache(id))
+      
+      // Also update previewsMap for backwards compatibility
       setPreviewsMap((prev) => {
         const updated = { ...prev }
         Object.keys(updated).forEach(folder => {
@@ -492,6 +632,35 @@ export default function Dashboard() {
     
     Promise.all(promises).catch(() => {})
     
+    // Update cache
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      const movedEmails: any[] = []
+      
+      Object.keys(updated).forEach(folder => {
+        const folderCache = updated[folder]
+        Object.keys(folderCache || {}).forEach(pageNum => {
+          const emails = folderCache[pageNum]
+          const remaining: any[] = []
+          emails.forEach((e: any) => {
+            if (ids.has(String(e.id))) {
+              movedEmails.push({ ...e, labels: ['trash'] })
+            } else {
+              remaining.push(e)
+            }
+          })
+          folderCache[pageNum] = remaining
+        })
+      })
+      
+      // Add to trash cache (page 1)
+      if (!updated['trash']) updated['trash'] = {}
+      updated['trash'][1] = [...(updated['trash'][1] || []), ...movedEmails]
+      
+      return updated
+    })
+    
+    // Also update previewsMap for backwards compatibility
     setPreviewsMap((prev) => {
       const updated = { ...prev }
       const movedEmails: any[] = []
@@ -557,6 +726,8 @@ export default function Dashboard() {
     const emailId = String(selectedEmail.id)
 
     if (selectedFolder === 'trash') {
+      removeEmailFromCache(emailId)
+      
       setPreviewsMap((prev) => {
         const updated = { ...prev }
         Object.keys(updated).forEach(folder => {
@@ -574,6 +745,45 @@ export default function Dashboard() {
       mailApi.modifyEmail(emailId, { labels: ['trash'] }).catch(() => {})
     } catch (e) {}
 
+    // Update cache
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+
+      if (selectedFolder === 'drafts' || (selectedEmail.tags && selectedEmail.tags.some((tag: any) => tag.id === 'DRAFT'))) {
+        // For draft folder, just remove the email from cache
+        if (updated[selectedFolder]) {
+          Object.keys(updated[selectedFolder]).forEach(pageNum => {
+            updated[selectedFolder][pageNum] = updated[selectedFolder][pageNum].filter((e: any) => String(e.id) !== emailId)
+          })
+        }
+      } else {
+        // For other folders, move to trash
+        const movedEmails: any[] = []
+
+        Object.keys(updated).forEach(folder => {
+          const folderCache = updated[folder] || {}
+          Object.keys(folderCache).forEach(pageNum => {
+            const emails = folderCache[pageNum] || []
+            const remaining: any[] = []
+            emails.forEach((e: any) => {
+              if (String(e.id) === emailId) {
+                movedEmails.push({ ...e, labels: ['trash'] })
+              } else {
+                remaining.push(e)
+              }
+            })
+            folderCache[pageNum] = remaining
+          })
+        })
+
+        if (!updated['trash']) updated['trash'] = {}
+        updated['trash'][1] = [...(updated['trash'][1] || []), ...movedEmails]
+      }
+
+      return updated
+    })
+
+    // Also update previewsMap for backwards compatibility
     setPreviewsMap((prev) => {
       const updated = { ...prev }
 
@@ -647,11 +857,22 @@ export default function Dashboard() {
     setSelectedEmail(null)
     setSelectedIds({})
     setMobileView('list')
-    setPageTokenMap((prev) => ({
-      ...prev,
-      [selectedFolder]: null
-    }))
-    await loadFolderData(selectedFolder, true)
+    
+    // Clear cache for current folder
+    setPageCacheMap((prev) => {
+      const updated = { ...prev }
+      delete updated[selectedFolder]
+      return updated
+    })
+    
+    setPageTokensMap((prev) => {
+      const updated = { ...prev }
+      delete updated[selectedFolder]
+      return updated
+    })
+    
+    setCurrentPageMap(prev => ({ ...prev, [selectedFolder]: 1 }))
+    await loadFolderData(selectedFolder, 1)
   }
 
   const [composeTo, setComposeTo] = useState('')
@@ -1233,7 +1454,6 @@ export default function Dashboard() {
             <div
               className="email-list"
               ref={listRef}
-              onScroll={handleScroll}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
@@ -1300,15 +1520,28 @@ export default function Dashboard() {
                   </ListGroup>
                 )}
                 
-                {loadingMore && (
-                  <div className="text-center p-3">
-                    <FaSync className="fa-spin" size={20} />
-                    <small className="ms-2">Loading more...</small>
-                  </div>
-                )}
-                {!loadingMore && hasMoreMap[selectedFolder] && selectedFolder !== 'search_results' && (
-                  <div className="text-center p-3">
-                    <small className="text-muted">Scroll down for more emails</small>
+                {/* Pagination Controls */}
+                {selectedFolder !== 'search_results' && displayList.length > 0 && (
+                  <div className="pagination-controls d-flex justify-content-between align-items-center p-3 border-top">
+                    <Button 
+                      variant="outline-light" 
+                      size="sm"
+                      disabled={!currentPageMap[selectedFolder] || currentPageMap[selectedFolder] <= 1}
+                      onClick={goToPreviousPage}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-white small">
+                      Page {currentPageMap[selectedFolder] || 1}
+                    </span>
+                    <Button 
+                      variant="outline-light" 
+                      size="sm"
+                      disabled={!currentPageMap[selectedFolder] || currentPageMap[selectedFolder] >= (totalPagesMap[selectedFolder] || 1)}
+                      onClick={goToNextPage}
+                    >
+                      Next
+                    </Button>
                   </div>
                 )}
               </>

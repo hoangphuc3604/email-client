@@ -394,3 +394,21 @@ div[style*="overflowX: 'auto'"]::-webkit-scrollbar-thumb:hover,
 div[style*="overflow: auto"]::-webkit-scrollbar-thumb:hover {
   background: rgba(199, 112, 240, 0.8);
 }
+
+/* Pagination Controls */
+.pagination-controls {
+  background: linear-gradient(180deg, rgba(27,26,46,0.9), rgba(27,26,46,0.95));
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+
+.pagination-controls .btn {
+  min-width: 80px;
+}
+
+.pagination-controls .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
