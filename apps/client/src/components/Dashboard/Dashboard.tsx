@@ -41,6 +41,7 @@ import { OverlayTrigger, Tooltip } from 'react-bootstrap'
 import { BsKanban, BsListUl } from 'react-icons/bs'; 
 import { AiOutlineClose } from 'react-icons/ai'; // [Cập nhật] Icon đóng
 import KanbanBoard from './KanbanBoard'; 
+
 import { useSearchParams } from 'react-router-dom';
 import { useSearch } from '../../contexts/SearchContext'; // [Cập nhật] Hook lấy query param
 
@@ -116,6 +117,9 @@ export default function Dashboard() {
   // [Cập nhật] Hook xử lý search query
   const [searchParams] = useSearchParams();
   const searchQuery = searchParams.get('q');
+
+  const folderParam = searchParams.get('folder') || undefined; // [NEW] read folder from URL
+
   const { selectedEmail, setSelectedEmail } = useSearch();
 
   useEffect(() => {
@@ -188,7 +192,19 @@ export default function Dashboard() {
     return unreadCount
   }, [pageCacheMap])
 
+  // [NEW] Sync folder from URL (?folder=...) triggered from Navbar
+  useEffect(() => {
+    if (folderParam && folderParam !== selectedFolder) {
+      selectFolder(folderParam);
+    }
+  }, [folderParam]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function selectFolder(id: string) {
+
+    // [CHANGED] Keep URL in sync when switching folder (except search_results)
+    if (id !== 'search_results') {
+      setSearchParams({ folder: id });
+    }
 
     // Reset all states for clean folder switch
     setSelectedFolder(id)
@@ -196,8 +212,8 @@ export default function Dashboard() {
     setSelectedIds({})
     setCursorIndex(0)
     setMobileView('list')
-    setError(null) // Clear any previous errors
-    setLoadingMore(false) // Reset loading more state
+    setError(null)
+    setLoadingMore(false)
 
     // Initialize current page to 1 FIRST, before any loading
     setCurrentPageMap(prev => ({ ...prev, [id]: 1 }))
@@ -208,7 +224,6 @@ export default function Dashboard() {
       scrollTopRef.current = 0
     }
 
-    // Không load lại nếu là folder search_results (vì dữ liệu lấy từ API search)
     if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
       loadFolderData(id, 1)
     }
@@ -239,10 +254,41 @@ export default function Dashboard() {
     setLoadingFolders(prev => new Set([...prev, folderId]))
     
     try {
+
+      const pageToken = isInitial ? null : pageTokenMap[folderId]
+      const res = await mailApi.listEmails(folderId, INITIAL_LOAD_COUNT, pageToken || undefined)
+      // Lấy danh sách email từ response
+      let previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+      
+      // --- [ĐOẠN CODE MỚI] ---
+      // Nếu đang tải folder 'starred', kiểm tra và đảm bảo mọi email đều có tag STARRED
+      if (folderId === 'starred') {
+        previews = previews.map((email: any) => {
+          const rawTags = email.tags || email.labels || [];
+          
+          // Kiểm tra xem đã có tag star chưa (xử lý cả string và object)
+          const hasStar = Array.isArray(rawTags) && rawTags.some((t: any) => 
+            (typeof t === 'string' && (t === 'STARRED' || t === 'starred')) || 
+            (typeof t === 'object' && (t.id === 'STARRED' || t.name === 'STARRED'))
+          );
+
+          // Nếu chưa có, tự động thêm vào để UI hiển thị đúng (Ngôi sao đặc màu xanh)
+          if (!hasStar) {
+             const starTag = { id: 'STARRED', name: 'STARRED' };
+             // Cập nhật cả tags và labels để an toàn
+             const newTags = [...(Array.isArray(rawTags) ? rawTags : []), starTag];
+             return { ...email, tags: newTags, labels: newTags };
+          }
+          return email;
+        });
+      }
+      // -----------------------
+
       // Get page token for this page (null for page 1)
       const pageToken = pageNum === 1 ? null : pageTokensRef.current[folderId]?.[pageNum - 1]
       const res = await mailApi.listEmails(folderId, PAGE_SIZE, pageToken || undefined)
       const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
+
       const nextPageToken = res?.next_page_token || res?.nextPageToken
       
       // Cache the page data
@@ -499,8 +545,8 @@ export default function Dashboard() {
       setMailboxes(uniqueFiltered.length > 0 ? uniqueFiltered : [])
       setLoadingMailboxes(false)
       
-      // Nếu có query search thì không load inbox mặc định để tránh ghi đè UI
-      if (!searchQuery) {
+      // [CHANGED] Only auto-load Inbox when no search and no folder param
+      if (!searchQuery && !searchParams.get('folder')) {
         const inboxId = 'inbox'
         await loadFolderData(inboxId, 1)
       }
@@ -841,15 +887,65 @@ export default function Dashboard() {
     setSelectedIds({})
   }
   
+  // Tìm hàm toggleStar cũ và thay thế bằng hàm này
   async function toggleStar(email: any) {
-    const hasStar = (email.labels || []).includes('starred') || (email.labels || []).includes('STARRED')
-    
+    // Kiểm tra trạng thái hiện tại
+    // Lưu ý: Backend trả về labels/tags có thể là string[] hoặc object[], cần check kỹ
+    const currentLabels = email.labels || email.tags || [];
+    const isStarred = currentLabels.includes('starred') || 
+                      currentLabels.includes('STARRED') || 
+                      currentLabels.some((t: any) => t.id === 'STARRED' || t.name === 'STARRED');
+
+    // 1. OPTIMISTIC UPDATE: Cập nhật giao diện NGAY LẬP TỨC
+    setPreviewsMap((prev) => {
+      const updated = { ...prev };
+      
+      // Chạy qua tất cả các folder đang load để tìm email này và update trạng thái
+      Object.keys(updated).forEach(folder => {
+        updated[folder] = updated[folder].map((e: any) => {
+          if (e.id === email.id) {
+            let newLabels = e.labels || e.tags || [];
+            
+            // Nếu là mảng object (từ backend search/detail), chuyển về dạng đơn giản để xử lý UI
+            if (isStarred) {
+              // Đang Star -> Bỏ Star (Unstar)
+              if (Array.isArray(newLabels)) {
+                 newLabels = newLabels.filter((l: any) => {
+                    const val = typeof l === 'string' ? l : (l.id || l.name);
+                    return val !== 'starred' && val !== 'STARRED';
+                 });
+              }
+            } else {
+              // Chưa Star -> Thêm Star
+              // Thêm string 'starred' vào để logic hiển thị bên dưới bắt được
+              newLabels = [...newLabels, 'starred']; 
+            }
+            
+            // Trả về email với labels mới
+            return { ...e, labels: newLabels, tags: newLabels };
+          }
+          return e;
+        });
+      });
+      return updated;
+    });
+
+    // 2. Gọi API để đồng bộ với Server và Gmail thật
     try {
+
+      await mailApi.modifyEmail(email.id, { starred: !isStarred });
+      
+      // Nếu folder hiện tại là 'starred' và ta vừa bỏ star, thì mới cần load lại để nó biến mất
+      if (selectedFolder === 'starred' && isStarred) {
+         // Đợi một chút cho hiệu ứng click xong rồi mới refresh
+         setTimeout(() => refreshFolder(), 300);
+      }
       await mailApi.modifyEmail(email.id, { starred: !hasStar })
       await refreshFolder()
     } catch (e) {
-      console.error('Failed to toggle star on backend:', e)
-      alert('Failed to update star status')
+      console.error('Failed to toggle star on backend:', e);
+      // Nếu lỗi thì có thể revert lại state (tùy chọn), nhưng thường user sẽ thử lại
+      alert('Failed to update star status');
     }
   }
   
@@ -1292,7 +1388,8 @@ export default function Dashboard() {
       <Particle />
       <Container className="dashboard-container">
         <Row className="dashboard-row">
-          <Col md={2} className={`folder-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
+          {/* [CHANGED] Mailbox column: fully hidden on mobile */}
+          <Col md={2} className="folder-column d-none d-md-block">
             <div className="folders-header pt-3">
               <h5>Mailboxes</h5>
             </div>
@@ -1377,7 +1474,11 @@ export default function Dashboard() {
             </Col>
           ) : (
             <>
-          <Col md={4} className={`email-list-column ${mobileView === 'detail' ? 'hide-on-mobile' : ''}`}>
+          {/* [CHANGED] List column: hide on mobile when in detail view */}
+          <Col
+            md={4}
+            className={`email-list-column ${mobileView === 'detail' ? 'd-none d-md-flex' : 'd-flex'}`}
+          >
              {/* [Cập nhật] Header cho trang kết quả tìm kiếm */}
 
             <div className="email-list-actions d-flex align-items-center mb-2 gap-2">
@@ -1484,7 +1585,16 @@ export default function Dashboard() {
                       const subject = email.subject || ''
                       const preview = email.body || email.preview || ''
                       const ts = email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : Date.now())
-                      const isStarred = ((email.labels || email.tags) || []).includes('starred')
+                      const rawLabels = email.labels || email.tags || [];
+                      const isStarred = 
+                        // Case 1: Array of strings (['STARRED', 'INBOX'])
+                        (Array.isArray(rawLabels) && rawLabels.some((l: any) => 
+                            typeof l === 'string' && (l === 'starred' || l === 'STARRED')
+                        )) ||
+                        // Case 2: Array of objects ([{id: 'STARRED', ...}])
+                        (Array.isArray(rawLabels) && rawLabels.some((t: any) => 
+                            typeof t === 'object' && (t.id === 'STARRED' || t.name === 'STARRED' || t.id === 'starred')
+                        ));
                       return (
                         <ListGroup.Item
                           id={`email-row-${id}`}
@@ -1504,8 +1614,12 @@ export default function Dashboard() {
                             <Form.Check type="checkbox" checked={!!selectedIds[id]} onChange={() => toggleSelect(id)} />
                           </div>
                           <div className="star-col me-2" onClick={(e) => { e.stopPropagation(); toggleStar(email) }}>
-                            {isStarred ? <FaStar /> : <FaRegStar />}
-                          </div>
+                            {isStarred ? (
+                                <FaStar className="starred-active" size={16} /> 
+                            ) : (
+                                <FaRegStar size={16} />
+                            )}
+                            </div>
                           <div className="meta-col flex-fill">
                             <div className="row-top d-flex justify-content-between">
                               <div className="sender">{sender}</div>
@@ -1549,7 +1663,11 @@ export default function Dashboard() {
             </div>
           </Col>
 
-          <Col md={6} className={`email-detail-column ${mobileView === 'list' ? 'hide-on-mobile' : ''}`}>
+          {/* [CHANGED] Detail column: hide on mobile when in list view */}
+          <Col
+            md={6}
+            className={`email-detail-column ${mobileView === 'list' ? 'd-none d-md-flex' : 'd-flex'}`}
+          >
             {loadingEmail ? (
               <div className="text-center mt-5">
                 <FaSync className="fa-spin" size={48} />

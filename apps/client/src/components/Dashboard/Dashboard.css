@@ -395,6 +395,78 @@ div[style*="overflow: auto"]::-webkit-scrollbar-thumb:hover {
   background: rgba(199, 112, 240, 0.8);
 }
 
+/* --- CẬP NHẬT GIAO DIỆN THEO YÊU CẦU MỚI (SENDER) --- */
+
+/* 1. Cố định Ngôi sao luôn là màu TRẮNG (bất kể trạng thái đọc/chưa đọc) */
+.email-list .star-col {
+  color: #ffffff !important;
+}
+
+/* 2. Mặc định (ĐÃ ĐỌC): Tên người gửi (Sender) là màu TRẮNG */
+.email-list .sender {
+  color: #ffffff !important;
+  font-weight: normal;
+}
+
+/* 3. Trạng thái CHƯA ĐỌC (.unread): Tên người gửi (Sender) chuyển sang màu XANH */
+.email-list .list-group-item.unread .sender {
+  color: #0b3af4 !important; /* Màu xanh dương neon nổi bật */
+  font-weight: bold;         /* In đậm để nhấn mạnh thư mới */
+}
+/* 1. Cố định Ngôi sao luôn là màu TRẮNG (bất kể trạng thái đọc/chưa đọc) */
+.email-list .star-col {
+  color: #ffffff !important;
+}
+
+/* --- VÀ THAY THẾ BẰNG ĐOẠN NÀY --- */
+/* 1. Cố định Ngôi sao mặc định (chưa star) là màu TRẮNG */
+.email-list .star-col {
+  color: #ffffff;
+  cursor: pointer;
+}
+
+/* Class mới dành cho ngôi sao đã kích hoạt (màu xanh dương) */
+.email-list .star-col .starred-active {
+  color: #0b3af4 !important; /* Màu xanh dương neon */
+  filter: drop-shadow(0 0 2px #0b3af4); /* Thêm chút hiệu ứng phát sáng nếu thích */
+}
+
+
+
+/* Mobile Enhancements */
+@media (max-width: 767px) {
+  /* Dashboard row chiếm full màn hình trừ navbar */
+  .dashboard-container {
+    height: calc(100vh - 60px) !important; /* Điều chỉnh chiều cao cho vừa */
+    margin-top: 10px !important;
+  }
+  
+  .dashboard-row {
+    height: 100% !important;
+    border-radius: 0 !important; /* Bỏ bo góc trên mobile cho rộng chỗ */
+  }
+
+  /* Mailbox column đã bị ẩn bằng class d-none d-md-block trong code React */
+  
+  /* List Column & Detail Column chiếm full width */
+  .email-list-column, 
+  .email-detail-column {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 0 0 100% !important;
+    border-right: none !important;
+  }
+
+  /* Tinh chỉnh item trong list cho dễ bấm */
+  .email-list .list-group-item {
+    padding: 1rem !important;
+  }
+
+  /* Ẩn scrollbar ngang không cần thiết */
+  .dashboard-section {
+    padding: 55px 0 0 0 !important; /* Sát lề, chừa chỗ cho Navbar */
+    overflow-x: hidden;
+  }
 /* Pagination Controls */
 .pagination-controls {
   background: linear-gradient(180deg, rgba(27,26,46,0.9), rgba(27,26,46,0.95));
