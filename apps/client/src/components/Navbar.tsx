@@ -52,7 +52,6 @@ const getIconForFolder = (id: string) => {
     default: return <FaFolder className="me-2" />;
   }
 };
-import mailApi from "../api/mail";
 import { useSearch } from '../contexts/SearchContext'; // [NEW] Import API
 
 
