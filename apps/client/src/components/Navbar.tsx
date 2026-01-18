@@ -17,7 +17,6 @@ import Button from "react-bootstrap/Button";       // [NEW]
 
 import { ImBlog } from "react-icons/im";
 import {
-  AiOutlineFundProjectionScreen,
   AiOutlineUser,
   AiOutlineLogout,
   AiOutlineSearch,
@@ -73,7 +72,7 @@ function NavBar() {
   const [suggestions, setSuggestions] = useState<any[]>([]); // [NEW] Store suggestions
   const [showSuggestions, setShowSuggestions] = useState(false); // [NEW] Toggle dropdown
 
-  const { searchResults, lastSearchQuery, setSelectedEmail } = useSearch();
+  const { lastSearchQuery, setSelectedEmail } = useSearch();
 
   console.log('Navbar render - searchQuery:', searchQuery, 'showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length);
 

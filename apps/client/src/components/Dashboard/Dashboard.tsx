@@ -81,21 +81,19 @@ export default function Dashboard() {
   })
   const [loadedFolders, setLoadedFolders] = useState<Set<string>>(new Set())
   const [foldersNeedReload, setFoldersNeedReload] = useState<Set<string>>(new Set())
-  const [pageTokenMap, setPageTokenMap] = useState<Record<string, string | null>>({})
-  const [hasMoreMap, setHasMoreMap] = useState<Record<string, boolean>>({})
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
   
   // Pagination states
   const [currentPageMap, setCurrentPageMap] = useState<Record<string, number>>({})
   const [pageCacheMap, setPageCacheMap] = useState<Record<string, Record<number, any[]>>>({})
   const [totalPagesMap, setTotalPagesMap] = useState<Record<string, number>>({})
-  const [pageTokensMap, setPageTokensMap] = useState<Record<string, Record<number, string | null>>>({})
+  const [_pageTokensMap, setPageTokensMap] = useState<Record<string, Record<number, string | null>>>({})
   const PAGE_SIZE = 20
   const [showCompose, setShowCompose] = useState(false)
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
   const [cursorIndex, setCursorIndex] = useState(0)
   const [loadingMailboxes, setLoadingMailboxes] = useState(true)
-  const [loading, setLoading] = useState(false)
+  const [_loading, setLoading] = useState(false)
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set()) // Track loading state per folder
@@ -106,7 +104,6 @@ export default function Dashboard() {
   const scrollStartRef = useRef(0)
   const pageCacheRef = useRef<Record<string, Record<number, any[]>>>({})
   const pageTokensRef = useRef<Record<string, Record<number, string | null>>>({})
-  const INITIAL_LOAD_COUNT = 20
     
   // Thêm state
   const [filterMode, setFilterMode] = useState<'all' | 'unread' | 'has-attachment'>('all');
@@ -115,7 +112,7 @@ export default function Dashboard() {
   const [autoSyncAttempted, setAutoSyncAttempted] = useState(false); // Track if auto-sync was attempted
   
   // [Cập nhật] Hook xử lý search query
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('q');
 
   const folderParam = searchParams.get('folder') || undefined; // [NEW] read folder from URL
@@ -130,7 +127,95 @@ export default function Dashboard() {
     }
   }, [previewsMap])
 
+  // [Cập nhật] Logic xử lý khi có search query
+  useEffect(() => {
+    if (searchQuery) {
+      handleSearch(searchQuery);
+    }
+  }, [searchQuery]);
 
+  // [Cập nhật] Hàm thực hiện tìm kiếm
+  async function handleSearch(query: string, skipAutoSync: boolean = false) {
+    setLoading(true);
+    setError(null); // Reset lỗi cũ
+    try {
+      console.log('[Search] Calling API with query:', query);
+      console.log('[Search] Attempting Semantic Search with query:', query);
+      
+      // 1. Ưu tiên gọi Semantic Search (Tìm kiếm thông minh)
+      let results = await mailApi.searchEmailsSemantic(query);
+      
+      // 2. [QUAN TRỌNG] Logic Fallback: 
+      // Nếu Semantic Search không trả về kết quả nào, ta gọi lại Search cũ (Keyword Search)
+      if (!results || (Array.isArray(results) && results.length === 0)) {
+          console.log('[Search] Semantic search returned 0 results. Falling back to Standard Keyword Search...');
+          results = await mailApi.searchEmails(query);
+      }
+
+      console.log('[Search] Final results:', results);
+      console.log('[Search] Raw API response:', results);
+      console.log('[Search] Is array?', Array.isArray(results));
+      console.log('[Search] Length:', results?.length);
+      
+      // Normalize search results to match preview format
+      const normalizedResults = Array.isArray(results) ? results.map((email: any) => ({
+        ...email,
+        // Convert received_on to timestamp if needed
+        timestamp: email.timestamp || (email.receivedOn ? Date.parse(email.receivedOn) : (email.received_on ? Date.parse(email.received_on) : Date.now())),
+        // Ensure hasAttachments field exists
+        hasAttachments: email.hasAttachments || email.has_attachments || false,
+        // Normalize preview/body field
+        preview: email.preview || email.body || email.snippet || '',
+      })) : [];
+      
+      console.log('[Search] Normalized results count:', normalizedResults.length);
+      console.log('[Search] Normalized results:', normalizedResults);
+      
+      setPreviewsMap((prev) => ({
+        ...prev,
+        'search_results': normalizedResults
+      }));
+      setSelectedFolder('search_results');
+      setSelectedEmail(null); // Clear any selected email to prevent random opening
+      // Don't force view mode - let user keep their preference
+      setMobileView('list');
+      
+      // Auto-sync if no results and haven't tried syncing yet
+      if (normalizedResults.length === 0 && !autoSyncAttempted && !skipAutoSync) {
+        console.log('[Search] No results found, attempting auto-sync...');
+        setAutoSyncAttempted(true); // Mark that we've attempted sync before starting
+        try {
+          await mailApi.syncEmailIndex(90, 5);
+          console.log('[Search] Auto-sync completed, waiting for index to be ready...');
+          // Wait a bit for MongoDB index to commit before re-searching
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          console.log('[Search] Re-searching...');
+          // Re-run search after sync, but skip auto-sync to prevent infinite loop
+          // Don't set loading to false yet - keep it true for the re-search
+          await handleSearch(query, true);
+          return; // Exit early to avoid setting loading to false
+        } catch (syncError: any) {
+          console.error('[Search] Auto-sync failed:', syncError);
+          setError(`No results found. Auto-sync failed: ${syncError.response?.data?.detail || syncError.message}`);
+        }
+      } else if (normalizedResults.length === 0) {
+        console.warn('[Search] No results found for query:', query);
+      }
+    } catch (e: any) {
+      console.error("[Search] Failed:", e);
+      console.error("[Search] Error details:", e.response?.data);
+      setError(`Failed to search emails: ${e.response?.data?.detail || e.message || 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // [Cập nhật] Hàm xóa tìm kiếm và quay về Inbox
+  function clearSearch() {
+    setSearchParams({}); // Xóa query param trên URL
+    setAutoSyncAttempted(false); // Reset auto-sync flag for next search
+    selectFolder('inbox');
+  }
 
   // [Cập nhật] Hàm thực hiện tìm kiếm
 
@@ -255,9 +340,9 @@ export default function Dashboard() {
     
     try {
 
-      const pageToken = isInitial ? null : pageTokenMap[folderId]
-      const res = await mailApi.listEmails(folderId, INITIAL_LOAD_COUNT, pageToken || undefined)
-      // Lấy danh sách email từ response
+      // Get page token for this page (null for page 1)
+      const pageToken = pageNum === 1 ? null : pageTokensRef.current[folderId]?.[pageNum - 1]
+      const res = await mailApi.listEmails(folderId, PAGE_SIZE, pageToken || undefined)
       let previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
       
       // --- [ĐOẠN CODE MỚI] ---
@@ -283,11 +368,6 @@ export default function Dashboard() {
         });
       }
       // -----------------------
-
-      // Get page token for this page (null for page 1)
-      const pageToken = pageNum === 1 ? null : pageTokensRef.current[folderId]?.[pageNum - 1]
-      const res = await mailApi.listEmails(folderId, PAGE_SIZE, pageToken || undefined)
-      const previews = (res && res.previews) ? res.previews : (res && res.threads ? res.threads : [])
 
       const nextPageToken = res?.next_page_token || res?.nextPageToken
       
@@ -416,7 +496,8 @@ export default function Dashboard() {
       const updated = { ...prev }
       Object.keys(updated).forEach(folder => {
         const folderCache = updated[folder]
-        Object.keys(folderCache).forEach(pageNum => {
+        Object.keys(folderCache).forEach(pageNumStr => {
+          const pageNum = parseInt(pageNumStr, 10)
           folderCache[pageNum] = folderCache[pageNum].map((e: any) => 
             e.id === emailId ? updateFn(e) : e
           )
@@ -432,7 +513,8 @@ export default function Dashboard() {
       const updated = { ...prev }
       Object.keys(updated).forEach(folder => {
         const folderCache = updated[folder]
-        Object.keys(folderCache).forEach(pageNum => {
+        Object.keys(folderCache).forEach(pageNumStr => {
+          const pageNum = parseInt(pageNumStr, 10)
           folderCache[pageNum] = folderCache[pageNum].filter((e: any) => e.id !== emailId)
         })
       })
@@ -685,7 +767,8 @@ export default function Dashboard() {
       
       Object.keys(updated).forEach(folder => {
         const folderCache = updated[folder]
-        Object.keys(folderCache || {}).forEach(pageNum => {
+        Object.keys(folderCache || {}).forEach(pageNumStr => {
+          const pageNum = parseInt(pageNumStr, 10)
           const emails = folderCache[pageNum]
           const remaining: any[] = []
           emails.forEach((e: any) => {
@@ -798,7 +881,8 @@ export default function Dashboard() {
       if (selectedFolder === 'drafts' || (selectedEmail.tags && selectedEmail.tags.some((tag: any) => tag.id === 'DRAFT'))) {
         // For draft folder, just remove the email from cache
         if (updated[selectedFolder]) {
-          Object.keys(updated[selectedFolder]).forEach(pageNum => {
+          Object.keys(updated[selectedFolder]).forEach(pageNumStr => {
+            const pageNum = parseInt(pageNumStr, 10)
             updated[selectedFolder][pageNum] = updated[selectedFolder][pageNum].filter((e: any) => String(e.id) !== emailId)
           })
         }
@@ -808,7 +892,8 @@ export default function Dashboard() {
 
         Object.keys(updated).forEach(folder => {
           const folderCache = updated[folder] || {}
-          Object.keys(folderCache).forEach(pageNum => {
+          Object.keys(folderCache).forEach(pageNumStr => {
+            const pageNum = parseInt(pageNumStr, 10)
             const emails = folderCache[pageNum] || []
             const remaining: any[] = []
             emails.forEach((e: any) => {
@@ -890,6 +975,7 @@ export default function Dashboard() {
   // Tìm hàm toggleStar cũ và thay thế bằng hàm này
   async function toggleStar(email: any) {
     // Kiểm tra trạng thái hiện tại
+    const hasStar = (email.labels || []).includes('starred') || (email.labels || []).includes('STARRED')
     // Lưu ý: Backend trả về labels/tags có thể là string[] hoặc object[], cần check kỹ
     const currentLabels = email.labels || email.tags || [];
     const isStarred = currentLabels.includes('starred') || 
