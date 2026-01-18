@@ -28,11 +28,13 @@ async def _get_cached_refresh(user_id: str) -> Optional[Dict]:
     """Get cached refresh result if still valid"""
     if user_id in _refresh_cache:
         cache_entry = _refresh_cache[user_id]
-        if time.time() - cache_entry["timestamp"] < _REFRESH_CACHE_TTL:
-            return cache_entry["tokens"]
-        else:
-            # Clean up expired cache
-            del _refresh_cache[user_id]
+        # Check if cache entry has required fields
+        if "timestamp" in cache_entry and "tokens" in cache_entry:
+            if time.time() - cache_entry["timestamp"] < _REFRESH_CACHE_TTL:
+                return cache_entry["tokens"]
+            else:
+                # Clean up expired cache
+                del _refresh_cache[user_id]
     return None
 
 async def _set_cached_refresh(user_id: str, tokens: Dict):

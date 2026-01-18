@@ -1397,6 +1397,121 @@ class MailService:
       except Exception as e:
           raise ValueError(f"Failed to reply to email: {str(e)}")
 
+  async def forward_email(self, user_id: str, email_id: str, forward_data: dict, attachments: list = None):
+    import base64
+    from googleapiclient.errors import HttpError
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.base import MIMEBase
+    from email import encoders
+
+    if not email_id:
+        raise ValueError("Email ID is required")
+    if not forward_data.get('to'):
+        raise ValueError("Recipient email address is required")
+    if not forward_data.get('subject'):
+        raise ValueError("Email subject is required")
+
+    service = await self.get_gmail_service(user_id)
+
+    try:
+        original_msg = service.users().messages().get(userId='me', id=email_id, format='full').execute()
+
+        payload = original_msg.get('payload', {})
+        headers = payload.get('headers', [])
+
+        def get_header(name):
+            return next((h['value'] for h in headers if h['name'].lower() == name.lower()), '')
+
+        from_header = get_header('From')
+        to_header = get_header('To')
+        subject_header = get_header('Subject')
+        date_header = get_header('Date')
+
+        message = MIMEMultipart()
+        message['to'] = forward_data.get('to')
+        message['subject'] = forward_data.get('subject')
+
+        body = forward_data.get('body', '')
+        body += f"\n\n---------- Forwarded message ----------\nFrom: {from_header}\nDate: {date_header}\nSubject: {subject_header}\nTo: {to_header}\n\n"
+
+        # Extract original email body
+        original_body_text = ""
+        original_body_html = ""
+
+        def parse_parts(parts):
+            nonlocal original_body_text, original_body_html
+            for part in parts:
+                mime_type = part.get('mimeType')
+                part_body = part.get('body', {})
+                data = part_body.get('data')
+
+                if mime_type == 'text/plain' and data:
+                    original_body_text += base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                elif mime_type == 'text/html' and data:
+                    original_body_html += base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                elif part.get('parts'):
+                    parse_parts(part.get('parts'))
+
+        if 'parts' in payload:
+            parse_parts(payload['parts'])
+        else:
+            data = payload.get('body', {}).get('data')
+            mime_type = payload.get('mimeType')
+            if data:
+                decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+                if mime_type == 'text/html':
+                    original_body_html = decoded
+                else:
+                    original_body_text = decoded
+
+        original_body = original_body_html or original_body_text
+        if original_body:
+            body += original_body
+
+        msg = MIMEText(body, 'html')
+        message.attach(msg)
+
+        if attachments:
+            for attachment in attachments:
+                try:
+                    mime_type_parts = attachment['mime_type'].split('/', 1)
+                    if len(mime_type_parts) == 2:
+                        part = MIMEBase(mime_type_parts[0], mime_type_parts[1])
+                    else:
+                        part = MIMEBase('application', 'octet-stream')
+
+                    part.set_payload(attachment['content'])
+                    encoders.encode_base64(part)
+                    part.add_header(
+                        'Content-Disposition',
+                        f'attachment; filename="{attachment["filename"]}"'
+                    )
+                    message.attach(part)
+                except Exception as e:
+                    raise ValueError(f"Failed to attach file '{attachment.get('filename', 'unknown')}': {str(e)}")
+
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        body = {'raw': raw}
+
+        sent_message = service.users().messages().send(userId='me', body=body).execute()
+        return sent_message
+    except HttpError as e:
+        if e.resp.status == 404:
+            raise ValueError(f"Original message {email_id} not found")
+        elif e.resp.status == 401:
+            raise ValueError("Authentication failed. Please refresh your Google credentials.")
+        elif e.resp.status == 403:
+            raise ValueError("Access denied. Insufficient permissions to send email.")
+        elif e.resp.status == 400:
+            raise ValueError(f"Invalid email format: {str(e)}")
+        else:
+            raise ValueError(f"Gmail API error: {str(e)}")
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Failed to forward email: {str(e)}")
+
   async def create_draft(self, user_id: str, draft_data: dict, attachments: list = None):
       """Create draft using Gmail API only (no DB storage)"""
       from googleapiclient.errors import HttpError

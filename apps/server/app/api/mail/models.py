@@ -158,6 +158,13 @@ class ReplyEmailRequest(CamelModel):
     subject: str
     body: str
 
+
+class ForwardEmailRequest(CamelModel):
+    """Request model for forwarding an email."""
+    to: str
+    subject: str
+    body: str
+
 # DB Document Models for storing full email content
 class EmailDocument(CamelModel):
     """

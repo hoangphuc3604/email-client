@@ -16,6 +16,13 @@ export interface ReplyEmailPayload {
   attachments?: File[]
 }
 
+export interface ForwardEmailPayload {
+  to: string
+  subject: string
+  body: string
+  attachments?: File[]
+}
+
 export interface ModifyEmailPayload {
   unread?: boolean
   starred?: boolean
@@ -88,6 +95,28 @@ const mailApi = {
     }
     
     const res = await api.post(`${BASE_ENDPOINT}/emails/${emailId}/reply`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return res.data?.data || res.data
+  },
+
+  async forwardEmail(emailId: string, payload: ForwardEmailPayload) {
+    // Backend expects FormData, not JSON
+    const formData = new FormData()
+    formData.append('to', payload.to)
+    formData.append('subject', payload.subject)
+    formData.append('body', payload.body)
+
+    // Add attachments if provided
+    if (payload.attachments && payload.attachments.length > 0) {
+      payload.attachments.forEach((file) => {
+        formData.append('attachments', file)
+      })
+    }
+
+    const res = await api.post(`${BASE_ENDPOINT}/emails/${emailId}/forward`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }

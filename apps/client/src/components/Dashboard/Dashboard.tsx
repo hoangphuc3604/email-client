@@ -35,6 +35,7 @@ import {
   FaBan,
   FaExclamationTriangle,
   FaFolder,
+  FaSpinner,
 } from 'react-icons/fa'
 import { BiEdit } from 'react-icons/bi'
 import { OverlayTrigger, Tooltip } from 'react-bootstrap'
@@ -279,12 +280,12 @@ export default function Dashboard() {
 
   // [NEW] Sync folder from URL (?folder=...) triggered from Navbar
   useEffect(() => {
-    if (folderParam && folderParam !== selectedFolder) {
-      selectFolder(folderParam);
+    if (folderParam) {
+      selectFolder(folderParam, true); // Force reload when coming from URL
     }
   }, [folderParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function selectFolder(id: string) {
+  function selectFolder(id: string, forceReload = false) {
 
     // [CHANGED] Keep URL in sync when switching folder (except search_results)
     if (id !== 'search_results') {
@@ -309,19 +310,19 @@ export default function Dashboard() {
       scrollTopRef.current = 0
     }
 
-    if (id !== 'search_results' && (!loadedFolders.has(id) || foldersNeedReload.has(id))) {
+    if (id !== 'search_results' && (forceReload || !loadedFolders.has(id) || foldersNeedReload.has(id))) {
       loadFolderData(id, 1)
     }
   }
 
-  async function loadFolderData(folderId: string, pageNum: number) {
+  async function loadFolderData(folderId: string, pageNum: number, forceRefresh = false) {
     // Check if page is already cached using ref for immediate access
     console.log(`loadFolderData called for ${folderId} page ${pageNum}`)
     console.log(`Current cache:`, pageCacheRef.current)
     const cachedPage = pageCacheRef.current[folderId]?.[pageNum]
     console.log(`Cached page data:`, cachedPage)
     
-    if (cachedPage && cachedPage.length > 0) {
+    if (cachedPage && cachedPage.length > 0 && !forceRefresh) {
       console.log(`✓ Using cached page ${pageNum} for ${folderId}`)
       setCurrentPageMap(prev => ({ ...prev, [folderId]: pageNum }))
       // Pre-fetch next page if not cached
@@ -644,9 +645,9 @@ export default function Dashboard() {
     try {
       const data = await mailApi.getEmail(email.id)
       const message = data.latest || data.messages?.[0] || data
-      const senderStr = typeof message.sender === 'string' 
-        ? message.sender 
-        : (message.sender?.name || message.sender?.email || 'Unknown')
+      const senderStr = typeof message.sender === 'string'
+        ? message.sender
+        : (message.sender?.email || message.sender?.name || 'Unknown')
       
       const actualMessageId = message.id || message.message_id || email.id
       
@@ -679,7 +680,7 @@ export default function Dashboard() {
       console.error('Error loading email:', err)
       const senderStr = typeof email.sender === 'string'
         ? email.sender
-        : (email.sender?.name || email.sender?.email || 'Unknown')
+        : (email.sender?.email || email.sender?.name || 'Unknown')
       setSelectedEmail({
         ...email,
         sender: senderStr,
@@ -1036,25 +1037,44 @@ export default function Dashboard() {
   }
   
   async function refreshFolder() {
-    setSelectedEmail(null)
-    setSelectedIds({})
-    setMobileView('list')
-    
-    // Clear cache for current folder
-    setPageCacheMap((prev) => {
-      const updated = { ...prev }
-      delete updated[selectedFolder]
-      return updated
-    })
-    
-    setPageTokensMap((prev) => {
-      const updated = { ...prev }
-      delete updated[selectedFolder]
-      return updated
-    })
-    
-    setCurrentPageMap(prev => ({ ...prev, [selectedFolder]: 1 }))
-    await loadFolderData(selectedFolder, 1)
+    setRefreshingFolder(true)
+    try {
+      setSelectedEmail(null)
+      setSelectedIds({})
+      setMobileView('list')
+
+      setCurrentPageMap(prev => ({ ...prev, [selectedFolder]: 1 }))
+
+      // Set loading state before clearing cache to prevent empty list
+      setLoadingFolders(prev => new Set([...prev, selectedFolder]))
+
+      // Clear old cache and tokens
+      setPageCacheMap((prev) => {
+        const updated = { ...prev }
+        delete updated[selectedFolder]
+        return updated
+      })
+
+      setPageTokensMap((prev) => {
+        const updated = { ...prev }
+        delete updated[selectedFolder]
+        return updated
+      })
+
+      // Load fresh data, force refresh to bypass cache
+      await loadFolderData(selectedFolder, 1, true)
+
+    } catch (error) {
+      console.error('Failed to refresh folder:', error)
+      // Clear loading state on error
+      setLoadingFolders(prev => {
+        const updated = new Set(prev)
+        updated.delete(selectedFolder)
+        return updated
+      })
+    } finally {
+      setRefreshingFolder(false)
+    }
   }
 
   const [composeTo, setComposeTo] = useState('')
@@ -1073,16 +1093,30 @@ export default function Dashboard() {
   const [replyingToId, setReplyingToId] = useState<string | null>(null)
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null)
 
+  const [showForward, setShowForward] = useState(false)
+  const [forwardTo, setForwardTo] = useState('')
+  const [forwardSubject, setForwardSubject] = useState('')
+  const [forwardBody, setForwardBody] = useState('')
+  const [forwardAttachments, setForwardAttachments] = useState<File[]>([])
+  const [forwardingToId, setForwardingToId] = useState<string | null>(null)
+  const [sendingReply, setSendingReply] = useState(false)
+  const [sendingCompose, setSendingCompose] = useState(false)
+  const [sendingForward, setSendingForward] = useState(false)
+  const [refreshingFolder, setRefreshingFolder] = useState(false)
+
   function handleReply(email: any) {
     let senderEmail = 'unknown@example.com'
     let senderDisplay = 'Unknown'
 
-    if (typeof email.sender === 'string') {
-      senderEmail = email.sender
-      senderDisplay = email.sender
-    } else if (email.sender?.email) {
+    if (email.sender?.email) {
       senderEmail = email.sender.email
       senderDisplay = email.sender.name ? `${email.sender.name} <${email.sender.email}>` : email.sender.email
+    } else if (typeof email.sender === 'string') {
+      senderEmail = email.sender
+      senderDisplay = email.sender
+    } else if (email.sender?.name) {
+      senderEmail = email.sender.name
+      senderDisplay = email.sender.name
     }
 
     setReplyTo(senderEmail)
@@ -1090,6 +1124,24 @@ export default function Dashboard() {
     setReplyBody(`\n\n--- Original Message ---\nFrom: ${senderDisplay}\nSubject: ${email.subject || '(no subject)'}\n\n`)
     setReplyingToId(email.id)
     setShowReply(true)
+  }
+
+  function handleForward(email: any) {
+    let senderDisplay = 'Unknown'
+
+    if (email.sender?.email) {
+      senderDisplay = email.sender.name ? `${email.sender.name} <${email.sender.email}>` : email.sender.email
+    } else if (typeof email.sender === 'string') {
+      senderDisplay = email.sender
+    } else if (email.sender?.name) {
+      senderDisplay = email.sender.name
+    }
+
+    setForwardTo('')
+    setForwardSubject(email.subject?.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject || '(no subject)'}`)
+    setForwardBody(`\n\n---------- Forwarded message ----------\nFrom: ${senderDisplay}\nSubject: ${email.subject || '(no subject)'}\n\n`)
+    setForwardingToId(email.id)
+    setShowForward(true)
   }
 
   function handleEditDraft(email: any) {
@@ -1105,38 +1157,21 @@ export default function Dashboard() {
   }
 
   async function handleCloseReply() {
-    if (replyBody && replyBody.trim()) {
-      const saveToDraft = confirm('Save this reply to drafts before closing?')
-      if (saveToDraft) {
-        try {
-          await mailApi.createDraft({
-            to: replyTo,
-            subject: replySubject || '(no subject)',
-            body: replyBody,
-            attachments: replyAttachments.length > 0 ? replyAttachments : undefined
-          })
-
-          setShowReply(false)
-          setReplyTo('')
-          setReplySubject('')
-          setReplyBody('')
-          setReplyAttachments([])
-          setReplyingToId(null)
-
-          alert('Draft saved successfully!')
-          await refreshFolder()
-        } catch (e: any) {
-          alert(`Failed to save draft: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
-          return
-        }
-      }
-    }
     setShowReply(false)
     setReplyTo('')
     setReplySubject('')
     setReplyBody('')
     setReplyAttachments([])
     setReplyingToId(null)
+  }
+
+  async function handleCloseForward() {
+    setShowForward(false)
+    setForwardTo('')
+    setForwardSubject('')
+    setForwardBody('')
+    setForwardAttachments([])
+    setForwardingToId(null)
   }
 
   async function sendReply() {
@@ -1155,7 +1190,8 @@ export default function Dashboard() {
       alert('Error: Original email ID is missing')
       return
     }
-    
+
+    setSendingReply(true)
     try {
       await mailApi.replyEmail(replyingToId, {
         to: replyTo,
@@ -1163,7 +1199,7 @@ export default function Dashboard() {
         body: replyBody,
         attachments: replyAttachments.length > 0 ? replyAttachments : undefined
       })
-      
+
       setShowReply(false)
       setReplyTo('')
       setReplySubject('')
@@ -1172,11 +1208,53 @@ export default function Dashboard() {
       setReplyingToId(null)
 
       alert('Reply sent successfully!')
-      
-      await refreshFolder()
-      
+
     } catch (e: any) {
       alert(`Failed to send reply: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
+    } finally {
+      setSendingReply(false)
+    }
+  }
+
+  async function sendForward() {
+    if (!forwardTo || !forwardTo.trim()) {
+      alert('Please enter a recipient email address')
+      return
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(forwardTo.trim())) {
+      alert('Please enter a valid email address in the "To" field')
+      return
+    }
+
+    if (!forwardingToId) {
+      alert('Error: Original email ID is missing')
+      return
+    }
+
+    setSendingForward(true)
+    try {
+      await mailApi.forwardEmail(forwardingToId, {
+        to: forwardTo,
+        subject: forwardSubject || '(no subject)',
+        body: forwardBody,
+        attachments: forwardAttachments.length > 0 ? forwardAttachments : undefined
+      })
+
+      setShowForward(false)
+      setForwardTo('')
+      setForwardSubject('')
+      setForwardBody('')
+      setForwardAttachments([])
+      setForwardingToId(null)
+
+      alert('Email forwarded successfully!')
+
+    } catch (e: any) {
+      alert(`Failed to forward email: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
+    } finally {
+      setSendingForward(false)
     }
   }
 
@@ -1243,17 +1321,18 @@ export default function Dashboard() {
       alert('Please enter a recipient email address')
       return
     }
-    
+
+    setSendingCompose(true)
     try {
-      await mailApi.sendEmail({ 
-        to: composeTo, 
+      await mailApi.sendEmail({
+        to: composeTo,
         cc: composeCc || undefined,
         bcc: composeBcc || undefined,
-        subject: composeSubject || '(no subject)', 
+        subject: composeSubject || '(no subject)',
         body: composeBody,
         attachments: composeAttachments.length > 0 ? composeAttachments : undefined
       })
-      
+
       setShowCompose(false)
       setComposeTo('')
       setComposeCc('')
@@ -1265,10 +1344,11 @@ export default function Dashboard() {
       setEditingDraftId(null)
 
       alert('Email sent successfully!')
-      await refreshFolder()
-      
+
     } catch (e: any) {
       alert(`Failed to send email: ${e.response?.data?.detail || e.message || 'Unknown error'}`)
+    } finally {
+      setSendingCompose(false)
     }
   }
 
@@ -1316,7 +1396,7 @@ export default function Dashboard() {
             <Button variant="outline-secondary" size="sm" onClick={() => handleReply(selectedEmail)}>
               <FaReply />
             </Button>
-            <Button variant="outline-secondary" size="sm" className="ms-1" onClick={() => { /* forward mock */ }}>
+            <Button variant="outline-secondary" size="sm" className="ms-1" onClick={() => handleForward(selectedEmail)}>
               <FaForward />
             </Button>
             {((selectedFolder === 'drafts') || (selectedEmail.tags && selectedEmail.tags.some((tag: any) => tag.id === 'DRAFT'))) && (
@@ -1583,7 +1663,7 @@ export default function Dashboard() {
                 </Button>
               </OverlayTrigger>
               <OverlayTrigger placement="bottom" overlay={<Tooltip>Refresh</Tooltip>}>
-                <Button variant="light" onClick={refreshFolder} aria-label="Refresh">
+                <Button variant="light" onClick={refreshFolder} disabled={refreshingFolder} aria-label="Refresh">
                   <FaSync />
                 </Button>
               </OverlayTrigger>
@@ -1833,8 +1913,17 @@ export default function Dashboard() {
           </Form>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={handleCloseCompose}>Cancel</Button>
-          <Button variant="primary" onClick={sendCompose}>Send</Button>
+          <Button variant="secondary" onClick={handleCloseCompose} disabled={sendingCompose}>Cancel</Button>
+          <Button variant="primary" onClick={sendCompose} disabled={sendingCompose}>
+            {sendingCompose ? (
+              <>
+                <FaSpinner className="fa-spin me-2" />
+                Sending...
+              </>
+            ) : (
+              'Send'
+            )}
+          </Button>
         </Modal.Footer>
       </Modal>
       
@@ -1877,8 +1966,70 @@ export default function Dashboard() {
           </Form>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={handleCloseReply}>Cancel</Button>
-          <Button variant="primary" onClick={sendReply}>Send Reply</Button>
+          <Button variant="secondary" onClick={handleCloseReply} disabled={sendingReply}>Cancel</Button>
+          <Button variant="primary" onClick={sendReply} disabled={sendingReply}>
+            {sendingReply ? (
+              <>
+                <FaSpinner className="fa-spin me-2" />
+                Sending...
+              </>
+            ) : (
+              'Send Reply'
+            )}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal show={showForward} onHide={handleCloseForward} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Forward Email</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group className="mb-2">
+              <Form.Label>To</Form.Label>
+              <Form.Control value={forwardTo} onChange={(e) => setForwardTo(e.target.value)} placeholder="Enter recipient email" />
+            </Form.Group>
+            <Form.Group className="mb-2">
+              <Form.Label>Subject</Form.Label>
+              <Form.Control value={forwardSubject} onChange={(e) => setForwardSubject(e.target.value)} />
+            </Form.Group>
+            <Form.Group className="mb-2">
+              <Form.Label>Body</Form.Label>
+              <Form.Control as="textarea" rows={8} value={forwardBody} onChange={(e) => setForwardBody(e.target.value)} />
+            </Form.Group>
+            <Form.Group>
+              <Form.Label>Attachments</Form.Label>
+              <Form.Control
+                type="file"
+                multiple
+                onChange={(e: any) => {
+                  const files = Array.from(e.target.files || [])
+                  setForwardAttachments(files as File[])
+                }}
+              />
+              {forwardAttachments.length > 0 && (
+                <div className="mt-2">
+                  <small className="text-muted">
+                    {forwardAttachments.length} file(s) selected: {forwardAttachments.map(f => f.name).join(', ')}
+                  </small>
+                </div>
+              )}
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleCloseForward} disabled={sendingForward}>Cancel</Button>
+          <Button variant="primary" onClick={sendForward} disabled={sendingForward}>
+            {sendingForward ? (
+              <>
+                <FaSpinner className="fa-spin me-2" />
+                Sending...
+              </>
+            ) : (
+              'Send Forward'
+            )}
+          </Button>
         </Modal.Footer>
       </Modal>
     </Container>

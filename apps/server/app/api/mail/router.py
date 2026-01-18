@@ -18,7 +18,8 @@ from app.api.mail.models import (
     EmailSearchRequest,
     ThreadPreview,
     SendEmailRequest,
-    ReplyEmailRequest
+    ReplyEmailRequest,
+    ForwardEmailRequest
 )
 from app.models.api_response import APIResponse
 
@@ -123,6 +124,60 @@ async def reply_email(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reply to email: {str(e)}")
+
+
+@router.post("/emails/{email_id}/forward", response_model=APIResponse[dict])
+async def forward_email(
+    email_id: str,
+    to: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    attachments: Optional[List[UploadFile]] = File(None),
+    mail_service: MailService = Depends(get_mail_service),
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Forward an email with optional attachments."""
+    try:
+        # Prepare forward data
+        forward_data = {
+            "to": to,
+            "subject": subject,
+            "body": body
+        }
+
+        # Process attachments if provided
+        attachment_list = []
+        if attachments:
+            MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB Gmail limit
+            for attachment in attachments:
+                # Read file content
+                content = await attachment.read()
+
+                # Validate file size
+                if len(content) > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Attachment '{attachment.filename}' exceeds 25MB limit"
+                    )
+
+                # Encode content to base64
+                encoded_content = base64.b64encode(content).decode('utf-8')
+
+                attachment_list.append({
+                    "filename": attachment.filename,
+                    "content": encoded_content,
+                    "mime_type": attachment.content_type or "application/octet-stream"
+                })
+
+        result = await mail_service.forward_email(current_user.id, email_id, forward_data, attachment_list)
+        return APIResponse(data=result, message="Email forwarded successfully")
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to forward email: {str(e)}")
 
 
 @router.post("/emails/send", response_model=APIResponse[dict])
