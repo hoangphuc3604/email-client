@@ -71,6 +71,7 @@ function NavBar() {
   const [searchQuery, setSearchQuery] = useState("");
   const [suggestions, setSuggestions] = useState<any[]>([]); // [NEW] Store suggestions
   const [showSuggestions, setShowSuggestions] = useState(false); // [NEW] Toggle dropdown
+  const [searchType, setSearchType] = useState<'semantic' | 'fuzzy'>('semantic'); // Search type selector
 
   const { lastSearchQuery, setSelectedEmail } = useSearch();
 
@@ -82,6 +83,15 @@ function NavBar() {
       setSearchQuery(lastSearchQuery);
     }
   }, [lastSearchQuery, searchQuery]);
+
+  // Sync searchType with URL params
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const typeParam = urlParams.get('type');
+    if (typeParam === 'fuzzy' || typeParam === 'semantic') {
+      setSearchType(typeParam);
+    }
+  }, []);
   
   // Ref to handle clicking outside the suggestion box
   const searchContainerRef = useRef<HTMLFormElement>(null);
@@ -144,8 +154,10 @@ function NavBar() {
       console.log('debounce executed - searchQuery:', searchQuery);
       if (searchQuery.length >= 2) {
         try {
-          console.log('calling API for:', searchQuery);
-          const results = await mailApi.searchEmailsSemantic(searchQuery);
+          console.log('calling API for:', searchQuery, 'type:', searchType);
+          const results = searchType === 'semantic'
+            ? await mailApi.searchEmailsSemantic(searchQuery)
+            : await mailApi.searchEmails(searchQuery);
           console.log('API results:', results);
           const list = Array.isArray(results) ? results : [];
           console.log('setting suggestions:', list.length, 'items');
@@ -178,8 +190,8 @@ function NavBar() {
   const performSearch = (query: string) => {
     setShowOffcanvas(false);
     setShowSuggestions(false);
-    // Navigate triggers the Dashboard to load, which executes the Semantic Search
-    navigate(`/dashboard?q=${encodeURIComponent(query)}`);
+    // Navigate triggers the Dashboard to load, which executes the selected search type
+    navigate(`/dashboard?q=${encodeURIComponent(query)}&type=${searchType}`);
   }
 
   // [NEW] Handle clicking a suggestion
@@ -315,6 +327,15 @@ function NavBar() {
                 }}
                 aria-label="Search"
               />
+              <Form.Select
+                size={isMobile ? 'sm' : undefined}
+                value={searchType}
+                onChange={(e) => setSearchType(e.target.value as 'semantic' | 'fuzzy')}
+                style={{ minWidth: '100px' }}
+              >
+                <option value="semantic">Semantic</option>
+                <option value="fuzzy">Fuzzy</option>
+              </Form.Select>
             </InputGroup>
 
             {/* [NEW] Type-ahead Suggestions Dropdown */}
