@@ -531,9 +531,8 @@ function NavBar() {
         <Offcanvas
           show={showOffcanvas}
           onHide={handleCloseOffcanvas}
-          responsive="md"
           placement="start"
-          className="mobile-sidebar-offcanvas"
+          className="mobile-sidebar-offcanvas d-md-none"
         >
           <Offcanvas.Header closeButton closeVariant="white">
             <Offcanvas.Title>
