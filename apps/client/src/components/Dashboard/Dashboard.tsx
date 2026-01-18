@@ -975,63 +975,64 @@ export default function Dashboard() {
   
   // Tìm hàm toggleStar cũ và thay thế bằng hàm này
   async function toggleStar(email: any) {
-    // Kiểm tra trạng thái hiện tại
-    const hasStar = (email.labels || []).includes('starred') || (email.labels || []).includes('STARRED')
-    // Lưu ý: Backend trả về labels/tags có thể là string[] hoặc object[], cần check kỹ
-    const currentLabels = email.labels || email.tags || [];
-    const isStarred = currentLabels.includes('starred') || 
-                      currentLabels.includes('STARRED') || 
-                      currentLabels.some((t: any) => t.id === 'STARRED' || t.name === 'STARRED');
+    // 1. Xác định trạng thái hiện tại
+    const rawLabels = email.labels || email.tags || [];
+    const isStarred = 
+      (Array.isArray(rawLabels) && rawLabels.some((l: any) => 
+          typeof l === 'string' && (l === 'starred' || l === 'STARRED')
+      )) ||
+      (Array.isArray(rawLabels) && rawLabels.some((t: any) => 
+          typeof t === 'object' && (t.id === 'STARRED' || t.name === 'STARRED' || t.id === 'starred')
+      ));
 
-    // 1. OPTIMISTIC UPDATE: Cập nhật giao diện NGAY LẬP TỨC
-    setPreviewsMap((prev) => {
+    // 2. OPTIMISTIC UPDATE: Cập nhật trực tiếp vào pageCacheMap (Nguồn dữ liệu của UI)
+    setPageCacheMap((prev) => {
       const updated = { ...prev };
       
-      // Chạy qua tất cả các folder đang load để tìm email này và update trạng thái
+      // Duyệt qua các folder và page trong cache để cập nhật email
       Object.keys(updated).forEach(folder => {
-        updated[folder] = updated[folder].map((e: any) => {
-          if (e.id === email.id) {
-            let newLabels = e.labels || e.tags || [];
-            
-            // Nếu là mảng object (từ backend search/detail), chuyển về dạng đơn giản để xử lý UI
-            if (isStarred) {
-              // Đang Star -> Bỏ Star (Unstar)
-              if (Array.isArray(newLabels)) {
-                 newLabels = newLabels.filter((l: any) => {
-                    const val = typeof l === 'string' ? l : (l.id || l.name);
-                    return val !== 'starred' && val !== 'STARRED';
-                 });
-              }
-            } else {
-              // Chưa Star -> Thêm Star
-              // Thêm string 'starred' vào để logic hiển thị bên dưới bắt được
-              newLabels = [...newLabels, 'starred']; 
-            }
-            
-            // Trả về email với labels mới
-            return { ...e, labels: newLabels, tags: newLabels };
-          }
-          return e;
+        const folderCache = updated[folder];
+        Object.keys(folderCache).forEach(pageNumStr => {
+           const pageNum = parseInt(pageNumStr, 10);
+           
+           // Nếu đang ở folder 'starred' và hành động là bỏ star -> Xóa khỏi danh sách
+           if (selectedFolder === 'starred' && isStarred) {
+             folderCache[pageNum] = folderCache[pageNum].filter((e: any) => e.id !== email.id);
+           } else {
+             // Cập nhật trạng thái label cho email
+             folderCache[pageNum] = folderCache[pageNum].map((e: any) => {
+               if (e.id === email.id) {
+                 let newLabels = e.labels || e.tags || [];
+                 if (isStarred) {
+                   // Bỏ Star
+                   newLabels = Array.isArray(newLabels) ? newLabels.filter((l: any) => {
+                     const val = typeof l === 'string' ? l : (l.id || l.name);
+                     return val !== 'starred' && val !== 'STARRED';
+                   }) : [];
+                 } else {
+                   // Thêm Star
+                   newLabels = [...(Array.isArray(newLabels) ? newLabels : []), 'starred'];
+                 }
+                 return { ...e, labels: newLabels, tags: newLabels };
+               }
+               return e;
+             });
+           }
         });
       });
       return updated;
     });
 
-    // 2. Gọi API để đồng bộ với Server và Gmail thật
+    // 3. Gọi API (Background sync)
     try {
-
       await mailApi.modifyEmail(email.id, { starred: !isStarred });
       
-      // Nếu folder hiện tại là 'starred' và ta vừa bỏ star, thì mới cần load lại để nó biến mất
-      if (selectedFolder === 'starred' && isStarred) {
-         // Đợi một chút cho hiệu ứng click xong rồi mới refresh
-         setTimeout(() => refreshFolder(), 300);
-      }
-      await mailApi.modifyEmail(email.id, { starred: !hasStar })
-      await refreshFolder()
+      // [QUAN TRỌNG] Đã loại bỏ refreshFolder() ở đây để tránh loading lại trang.
+      // Việc cập nhật cache ở bước 2 đã đủ để hiển thị đúng trên giao diện.
+      
     } catch (e) {
       console.error('Failed to toggle star on backend:', e);
-      // Nếu lỗi thì có thể revert lại state (tùy chọn), nhưng thường user sẽ thử lại
+      // Nếu API lỗi, bạn có thể xem xét revert lại state ở đây (tùy chọn)
       alert('Failed to update star status');
     }
   }
