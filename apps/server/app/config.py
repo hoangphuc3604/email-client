@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Backlog sync settings
     MAIL_SYNC_BACKLOG_ENABLED: bool = True
     MAIL_SYNC_BACKLOG_PAGE_SIZE: int = 20  # Page size for backlog processing
-    MAIL_SYNC_BACKLOG_INTERVAL_SECONDS: int = 180  # How often to run backlog processing (1 minute)
+    MAIL_SYNC_BACKLOG_INTERVAL_SECONDS: int = 300  # How often to run backlog processing (1 minute)
     MAIL_SYNC_BACKLOG_MAX_PAGES_PER_RUN: int = 2  # Max pages to process per backlog run
     QDRANT_URL: str = ""
     QDRANT_API_KEY: str = ""
