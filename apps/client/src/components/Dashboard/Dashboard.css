@@ -310,10 +310,24 @@
   background-color: white;
   border-radius: 4px;
   overflow: visible;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .email-body-container iframe {
   display: block;
+  flex: 1;
+  min-height: 300px;
+}
+
+.attachments {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  background-color: white;
+  border-radius: 4px;
+  padding: 1rem;
 }
 
 /* Email detail text colors */

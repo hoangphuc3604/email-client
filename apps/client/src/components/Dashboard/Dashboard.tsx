@@ -1430,7 +1430,7 @@ export default function Dashboard() {
             )}
           </Card.Subtitle>
           <hr />
-          <div className="email-body-container flex-grow-1">
+          <div className="email-body-container">
             <iframe
               ref={(iframe) => {
                 if (iframe) {
@@ -1518,7 +1518,7 @@ export default function Dashboard() {
           </div>
 
           {selectedEmail.attachments && selectedEmail.attachments.length > 0 && (
-            <div className="attachments mt-3">
+            <div className="attachments" style={{ flexShrink: 0, marginTop: '1rem' }}>
               <h6>Attachments ({selectedEmail.attachments.length})</h6>
               <div className="d-flex flex-wrap gap-2">
                 {selectedEmail.attachments.map((a: any, i: number) => (
