@@ -137,6 +137,22 @@ class MailService:
     elif snippet and len(snippet.strip()) > 20:
       email_content = snippet
 
+    # Skip emails with minimal content
+    if len(email_content.strip()) < 100:
+      return ""
+
+    # For replies, check if there's meaningful content before "Original Message"
+    if "--- Original Message ---" in email_content:
+      meaningful_part = email_content.split("--- Original Message ---")[0].strip()
+      if len(meaningful_part) < 50:
+        return ""
+
+    # For forwards, check if there's meaningful content before forwarded message
+    if "---------- Forwarded message ----------" in email_content:
+      meaningful_part = email_content.split("---------- Forwarded message ----------")[0].strip()
+      if len(meaningful_part) < 50:
+        return ""
+
     # Combine subject and content
     if email_content and subject:
       result = f"{subject}\n\n{email_content}".strip()
@@ -157,12 +173,24 @@ class MailService:
     docs_list = [d for d in docs if d.get("message_id")]
     if not docs_list:
       return
-    texts = [self._build_embedding_text(d) for d in docs_list]
-    embeddings = encode_texts(texts)
+
+    # Filter out docs that don't have meaningful content to embed
+    valid_docs = []
+    valid_texts = []
+    for doc in docs_list:
+      text = self._build_embedding_text(doc)
+      if text.strip():
+        valid_docs.append(doc)
+        valid_texts.append(text)
+
+    if not valid_docs:
+      return
+
+    embeddings = encode_texts(valid_texts)
     now = datetime.utcnow().isoformat()
     items: List[Dict[str, Any]] = []
     
-    for doc, emb in zip(docs_list, embeddings):
+    for doc, emb in zip(valid_docs, embeddings):
       message_id = doc["message_id"]
       labels = doc.get("labels") or []
 
@@ -225,7 +253,7 @@ class MailService:
         "autocomplete": {
           "path": "subject",
           "query": query,
-          "fuzzy": {"maxEdits": 2, "prefixLength": 1},
+          "fuzzy": {"maxEdits": 2, "prefixLength": 3},
           "score": {"boost": {"value": 5}}
         }
       },
@@ -233,7 +261,7 @@ class MailService:
         "autocomplete": {
           "path": "from_name",
           "query": query,
-          "fuzzy": {"maxEdits": 2, "prefixLength": 1},
+          "fuzzy": {"maxEdits": 2, "prefixLength": 3},
           "score": {"boost": {"value": 3}}
         }
       },
@@ -241,7 +269,7 @@ class MailService:
         "autocomplete": {
           "path": "from_email",
           "query": query,
-          "fuzzy": {"maxEdits": 2, "prefixLength": 1},
+          "fuzzy": {"maxEdits": 2, "prefixLength": 3},
           "score": {"boost": {"value": 3}}
         }
       },
@@ -249,7 +277,7 @@ class MailService:
         "autocomplete": {
           "path": "snippet",
           "query": query,
-          "fuzzy": {"maxEdits": 1, "prefixLength": 1},
+          "fuzzy": {"maxEdits": 1, "prefixLength": 3},
           "score": {"boost": {"value": 1}}
         }
       }
@@ -361,7 +389,7 @@ class MailService:
     logger.info(f"[SEMANTIC SEARCH] user_id={user_id}, query='{query}', mailbox_id={mailbox_id}, page={page}, limit={limit}")
 
     # Minimum similarity score threshold for relevance
-    SCORE_THRESHOLD = 0.5
+    SCORE_THRESHOLD = 0.6
 
     mailbox_label_id: Optional[str] = None
     if mailbox_id:

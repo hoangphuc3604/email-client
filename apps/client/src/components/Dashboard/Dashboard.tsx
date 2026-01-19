@@ -945,24 +945,22 @@ export default function Dashboard() {
   async function markReadUnread(makeRead: boolean) {
     const ids = new Set(Object.keys(selectedIds).filter((k) => selectedIds[k]))
     if (ids.size === 0) return
-    
-    const promises = Array.from(ids).map(id => 
-      mailApi.modifyEmail(id, { unread: !makeRead })
-        .catch(err => console.error(`Failed to mark email ${id} as ${makeRead ? 'read' : 'unread'}:`, err))
-    )
-    
-    Promise.all(promises).catch(() => {})
-    
-    setPreviewsMap((prev) => {
-      const updated = { ...prev }
-      Object.keys(updated).forEach(folder => {
-        updated[folder] = updated[folder].map((e: any) => 
-          ids.has(String(e.id)) ? { ...e, unread: !makeRead, read: makeRead } : e
-        )
-      })
-      return updated
-    })
-    
+
+    try {
+      const promises = Array.from(ids).map(id =>
+        mailApi.modifyEmail(id, { unread: !makeRead })
+      )
+
+      await Promise.all(promises)
+
+      // Refresh the folder data from server to ensure consistency
+      await refreshFolder()
+    } catch (error) {
+      console.error('Failed to mark emails as read/unread:', error)
+      alert('Failed to update email status. Please try again.')
+      return
+    }
+
     setSelectedIds({})
   }
   
